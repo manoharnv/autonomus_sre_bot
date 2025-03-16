@@ -18,10 +18,21 @@ Next, navigate to your project directory and install the dependencies:
 ```bash
 crewai install
 ```
+
 ### Customizing
 
-**Add your `OPENAI_API_KEY` into the `.env` file**
+**Environment Variables Configuration**
 
+1. Copy the `.env.example` file to a new file named `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+
+2. Edit the `.env` file and add the required API keys:
+   - `OPENAI_API_KEY`: Your OpenAI API key for LLM access
+   - `MIDDLEWARE_API_KEY`: Your Middleware.io API key for accessing log data
+
+Other customizations:
 - Modify `src/autonomous_sre_bot/config/agents.yaml` to define your agents
 - Modify `src/autonomous_sre_bot/config/tasks.yaml` to define your tasks
 - Modify `src/autonomous_sre_bot/crew.py` to add your own logic, tools and specific args
@@ -69,6 +80,30 @@ The workflow will:
 3. Create an incident in JSM with appropriate details
 4. Generate an `incident_report.md` file with the findings
 
+### Training the Incident Management Crew
+
+To train the incident management crew:
+
+```bash
+$ train_incident <n_iterations> <filename> [hours_to_search]
+```
+
+Parameters:
+- `n_iterations`: Number of training iterations to run
+- `filename`: Path to save the training results
+- `hours_to_search` (optional): Number of hours of logs to analyze during training (default: 24)
+
+For example, to train the crew for 5 iterations using the last 12 hours of logs:
+
+```bash
+$ train_incident 5 training_results.json 12
+```
+
+The training will:
+1. Run the incident management workflow multiple times
+2. Fine-tune the agents' behavior based on feedback
+3. Save the training results to the specified file
+
 ### Middleware.io Log Analysis
 
 The system connects to middleware.io at `https://manohar-nv.middleware.io` and can:
@@ -76,6 +111,8 @@ The system connects to middleware.io at `https://manohar-nv.middleware.io` and c
 - Detect common error patterns across services
 - Identify potential root causes of system issues
 - Recommend actions to address the identified problems
+
+**Note:** Access to Middleware.io requires an API key which must be set in the `.env` file as `MIDDLEWARE_API_KEY`.
 
 ### Incident Creation
 

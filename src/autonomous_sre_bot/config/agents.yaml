@@ -9,6 +9,7 @@ researcher:
     information and present it in a clear and concise manner.
   tools:
     - MiddlewareLogsTool
+  
 
 reporting_analyst:
   role: >
@@ -35,6 +36,8 @@ log_collector:
     useful information for incident investigation.
   tools:
     - MiddlewareLogsTool
+
+    
 
 log_analyzer:
   role: >
