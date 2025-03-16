@@ -1,15 +1,26 @@
 #!/usr/bin/env python
+import openlit
 import sys
 import warnings
 import os
 from dotenv import load_dotenv
-
+import base64
+import uuid
 from datetime import datetime
+import litellm
+from langfuse.decorators import langfuse_context, observe
 
 from autonomous_sre_bot.crew import AutonomousSreBot
 from autonomous_sre_bot.incident_crew import create_crew
 
+load_dotenv()
+langfuse_public_key = os.environ["LANGFUSE_PUBLIC_KEY"]
+langfuse_secret_key = os.environ["LANGFUSE_SECRET_KEY"]
+# set callbacks
 warnings.filterwarnings("ignore", category=SyntaxWarning, module="pysbd")
+LANGFUSE_AUTH=base64.b64encode(f"{langfuse_public_key}:{langfuse_secret_key}".encode()).decode()
+os.environ["OTEL_EXPORTER_OTLP_HEADERS"] = f"Authorization=Basic {LANGFUSE_AUTH}"
+openlit.init(disable_metrics=True)
 
 # This main file is intended to be a way for you to run your
 # crew locally, so refrain from adding unnecessary logic into this file.
