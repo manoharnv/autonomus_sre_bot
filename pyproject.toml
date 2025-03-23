@@ -22,7 +22,7 @@ autonomous_sre_bot = "autonomous_sre_bot.main:run_incident_management"
 run_crew = "autonomous_sre_bot.main:run_incident_management"
 train = "autonomous_sre_bot.main:train_incident_crew"
 replay = "autonomous_sre_bot.main:replay"
-test = "autonomous_sre_bot.main:test"
+test = "autonomous_sre_bot.main:test_incident_management"
 incident_management = "autonomous_sre_bot.main:run_incident_management"
 
 [build-system]

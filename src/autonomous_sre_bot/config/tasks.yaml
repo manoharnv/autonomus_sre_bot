@@ -1,20 +1,3 @@
-research_task:
-  description: >
-    Conduct a thorough research about {topic}
-    Make sure you find any interesting and relevant information given
-    the current year is {current_year}.
-  expected_output: >
-    A list with 10 bullet points of the most relevant information about {topic}
-  agent: researcher
-
-reporting_task:
-  description: >
-    Review the context you got and expand each topic into a full section for a report.
-    Make sure the report is detailed and contains any and all relevant information.
-  expected_output: >
-    A fully fledged report with the main topics, each with a full section of information.
-    Formatted as markdown without '```'
-  agent: reporting_analyst
 
 # New tasks for incident management
 collect_error_logs_task:
@@ -42,6 +25,14 @@ create_incident_task:
     Create a properly documented incident in Jira Service Management based on the log analysis.
     Include all relevant details such as affected services, root cause analysis, and recommended actions.
     Assign appropriate priority based on the severity and impact of the issue.
+    ---
+    Ensure that the incident is structured in a way that is easy to understand and actionable.
+    Create the incident in the Atlassian Document Format (ADF) to ensure proper formatting and structure as per below instructions:
+    1. Incorporate Atlassian Document Format (ADF) elements such as headings, tables, and links into the output to align with the required format.
+    2. Ensure that the output includes a structured format with clear sections for Incident frequency table, Incident Overview, Error Details, Potential Root Causes, and Recommendations.
+    3. Use ADF markup elements like headings, bullet lists, and tables to organize the information more effectively.
+    4. Include hyperlinks within the text for easy navigation to related resources or dashboards.
+    5. Validate the output against the ADF schema to ensure compatibility and correctness.
   expected_output: >
     A confirmation that the incident has been created in JSM with all necessary details.
     The incident should include a clear summary, detailed description, appropriate priority,

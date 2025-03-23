@@ -11,7 +11,7 @@ import litellm
 from langfuse.decorators import langfuse_context, observe
 
 from autonomous_sre_bot.crew import AutonomousSreBot
-from autonomous_sre_bot.incident_crew import create_crew
+from autonomous_sre_bot.incident_crew import IncidentManagementCrew
 
 load_dotenv()
 langfuse_public_key = os.environ["LANGFUSE_PUBLIC_KEY"]
@@ -42,14 +42,6 @@ def run():
         raise Exception(f"An error occurred while running the crew: {e}")
 
 
-def train(n_iterations: int, output_file: str):
-    """
-    Train the crew for the specified number of iterations.
-    """
-    print(f"Training crew for {n_iterations} iterations...")
-    crew = create_crew()
-    crew.train(n_iterations=n_iterations, output_file=output_file)
-    print(f"Training completed. Results saved to {output_file}")
 
 def train_incident_crew():
     """
@@ -70,7 +62,7 @@ def train_incident_crew():
 
     try:
         print(f"Training incident management crew for {sys.argv[1]} iterations...")
-        crew = create_crew()
+        crew = IncidentManagementCrew().crew()
         crew.train(
             n_iterations=int(sys.argv[1]), 
             filename=sys.argv[2], 
@@ -90,19 +82,31 @@ def replay():
     except Exception as e:
         raise Exception(f"An error occurred while replaying the crew: {e}")
 
-def test():
-    """
-    Test the crew execution and returns the results.
-    """
-    inputs = {
-        "topic": "AI LLMs",
-        "current_year": str(datetime.now().year)
-    }
-    try:
-        AutonomousSreBot().crew().test(n_iterations=int(sys.argv[1]), openai_model_name=sys.argv[2], inputs=inputs)
 
+def test_incident_management():
+    """
+    Test the incident management crew execution and returns the results.
+    Usage: test_incident_management <n_iterations> <model_name> [hours_to_search]
+    """
+    # Default to last 24 hours if no time period is specified
+    hours_to_search = 24
+    if len(sys.argv) > 3:
+        try:
+            hours_to_search = int(sys.argv[3])
+        except ValueError:
+            print(f"Invalid hours value: {sys.argv[3]}. Using default of 24 hours.")
+    
+    inputs = {
+        'hours_to_search': hours_to_search
+    }
+    
+    try:
+        print(f"Testing incident management crew for {sys.argv[1]} iterations using model {sys.argv[2]}...")
+        crew = IncidentManagementCrew().crew()
+        crew.test(n_iterations=int(sys.argv[1]), eval_llm=sys.argv[2], inputs=inputs)
+        print("Testing completed.")
     except Exception as e:
-        raise Exception(f"An error occurred while testing the crew: {e}")
+        raise Exception(f"An error occurred while testing the incident management crew: {e}")
 
 def run_incident_management():
     """
@@ -122,7 +126,7 @@ def run_incident_management():
     
     try:
         print(f"Starting incident management workflow for the past {hours_to_search} hours...")
-        crew = create_crew()
+        crew = IncidentManagementCrew().crew()
         crew.kickoff(inputs=inputs)
         print("Incident management workflow completed. Check 'incident_report.md' for details.")
     except Exception as e:
@@ -131,20 +135,29 @@ def run_incident_management():
 def main():
     """Main entry point for the application."""
     if len(sys.argv) < 2:
-        print("Usage: python -m autonomous_sre_bot.main [train|run] [options]")
+        print("Usage: python -m autonomous_sre_bot.main [train|test|run] [options]")
         sys.exit(1)
 
-    command = sys.argv[1]
+    command = sys.argv.pop(1)  # Remove the command and shift arguments
     
-    if command == "train":
-        if len(sys.argv) < 4:
-            print("Usage: python -m autonomous_sre_bot.main train <n_iterations> <output_file>")
+    try:
+        if command == "train":
+            if len(sys.argv) < 3:
+                print("Usage: python -m autonomous_sre_bot.main train <n_iterations> <output_file> [hours_to_search]")
+                sys.exit(1)
+            train_incident_crew()
+        elif command == "test":
+            if len(sys.argv) < 2:
+                print("Usage: python -m autonomous_sre_bot.main test <n_iterations> <model_name> [hours_to_search]")
+                sys.exit(1)
+            test_incident_management()
+        elif command == "run":
+            run_incident_management()
+        else:
+            print(f"Unknown command: {command}")
             sys.exit(1)
-        train(int(sys.argv[2]), sys.argv[3])
-    elif command == "run":
-        run()
-    else:
-        print(f"Unknown command: {command}")
+    except Exception as e:
+        print(f"Error: {str(e)}")
         sys.exit(1)
 
 if __name__ == "__main__":
