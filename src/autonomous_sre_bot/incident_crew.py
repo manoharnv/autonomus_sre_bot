@@ -31,7 +31,8 @@ class IncidentManagementCrew():
         return Agent(
             config=self.agents_config['log_analyzer'],
             verbose=True,
-            llm=self.llm
+            llm=self.llm,
+            reasoning=True
         )
     
     @agent
@@ -69,5 +70,7 @@ class IncidentManagementCrew():
             agents=self.agents,
             tasks=self.tasks,
             process=Process.sequential,
-            verbose=True
+            verbose=True,
+            planning=True,
+            planning_llm=self.llm,
         )

@@ -10,7 +10,6 @@ from datetime import datetime
 import litellm
 from langfuse.decorators import langfuse_context, observe
 
-from autonomous_sre_bot.crew import AutonomousSreBot
 from autonomous_sre_bot.incident_crew import IncidentManagementCrew
 
 load_dotenv()
@@ -26,20 +25,6 @@ openlit.init(disable_metrics=True)
 # crew locally, so refrain from adding unnecessary logic into this file.
 # Replace with inputs you want to test with, it will automatically
 # interpolate any tasks and agents information
-
-def run():
-    """
-    Run the crew.
-    """
-    inputs = {
-        'topic': 'AI LLMs',
-        'current_year': str(datetime.now().year)
-    }
-    
-    try:
-        AutonomousSreBot().crew().kickoff(inputs=inputs)
-    except Exception as e:
-        raise Exception(f"An error occurred while running the crew: {e}")
 
 
 
@@ -72,15 +57,7 @@ def train_incident_crew():
     except Exception as e:
         raise Exception(f"An error occurred while training the incident management crew: {e}")
 
-def replay():
-    """
-    Replay the crew execution from a specific task.
-    """
-    try:
-        AutonomousSreBot().crew().replay(task_id=sys.argv[1])
 
-    except Exception as e:
-        raise Exception(f"An error occurred while replaying the crew: {e}")
 
 
 def test_incident_management():

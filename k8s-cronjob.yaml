@@ -1,0 +1,33 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: autonomous-sre-bot
+  namespace: monitoring
+spec:
+  schedule: "0 * * * *"  # Run at the start of every hour
+  concurrencyPolicy: Forbid  # Don't allow concurrent runs
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: autonomous-sre-bot
+            image: autonomous-sre-bot:latest
+            imagePullPolicy: Always
+            resources:
+              requests:
+                cpu: "500m"
+                memory: "512Mi"
+              limits:
+                cpu: "1000m"
+                memory: "1Gi"
+            env:
+            - name: TZ
+              value: "UTC"
+            # Mount secrets as environment variables
+            envFrom:
+            - secretRef:
+                name: autonomous-sre-bot-secrets
+          restartPolicy: OnFailure

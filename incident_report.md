@@ -1,8 +1,16 @@
-The incident has been successfully created in Jira Service Management with the following details:
-- **Key**: SUP-29
-- **Summary**: Recurring Database Initialization and Data Handling Errors in python-service-1
-- **Type**: Incident
-- **Priority**: High
-- **URL**: [https://manoharnv.atlassian.net/browse/SUP-29](https://manoharnv.atlassian.net/browse/SUP-29)
+Successfully created Jira incident with all required details:
+- Key: SUP-43
+- Summary: "MiddlewareLogsTool Failure: Unable to Retrieve Logs from Middleware.io"
+- Type: Incident
+- Priority: High (justified by critical impact on monitoring systems and inability to perform root cause analysis)
+- URL: https://manoharnv.atlassian.net/browse/SUP-43
 
-The incident includes a detailed description in Atlassian Document Format (ADF) with sections for Incident Overview, Error Details (including a table with Error Type, Error Message, Code Location, Timestamps, and Impact), Potential Root Causes, Recommendations, and Priority Justification. The priority is set to 'High' due to the significant impact on service availability, user experience, and operational overhead. The incident is now ready for the operations team to address.
+The incident includes:
+1. Comprehensive Incident Overview section
+2. Detailed Error Details in tabular format
+3. Root Cause Analysis with bullet points
+4. Impact Assessment table
+5. Actionable Recommendations
+6. Priority Justification section
+
+All content is properly formatted in Atlassian Document Format (ADF) with appropriate headings, tables, and bullet lists. The incident contains all key elements from the analysis report and follows the required structure.
