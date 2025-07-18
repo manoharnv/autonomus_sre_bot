@@ -22,6 +22,7 @@ sequenceDiagram
     participant LAA as 🔍<br/>Log Analyzer Agent
     participant IMA as 🚨<br/>Incident Manager Agent
     participant LLM as 🤖<br/>Shared LLM<br/>(GPT-4o / DeepSeek-R1)
+    participant MW as 🌐<br/>middleware.io
     participant JSM as 🎫<br/>Jira Service Management
     participant OBS as 📈<br/>Langfuse (Observability)
 
@@ -32,7 +33,8 @@ sequenceDiagram
     Note over LCA, LLM: Log query strategy
     LLM-->>IMA: 
     
-    LCA->>LCA: Fetch logs
+    LCA->>MW: Fetch logs
+    MW-->>LCA: Return logs
     LCA->>LAA: Send logs
     
     LAA->>IMA: Analyze logs for root cause
