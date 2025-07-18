@@ -32,6 +32,7 @@ sequenceDiagram
     
     Note over LCA, LLM: Log query strategy
     LLM-->>IMA: 
+    LCA->>OBS: Log LLM interactions
     
     LCA->>MW: Fetch logs
     MW-->>LCA: Return logs
@@ -41,6 +42,7 @@ sequenceDiagram
     
     Note over LAA, LLM: Root cause summary
     LLM-->>LAA: 
+    LAA->>OBS: Log LLM interactions
     
     LAA->>IMA: Send RCA
     
@@ -48,7 +50,6 @@ sequenceDiagram
     
     Note over IMA, LLM: Ticket content
     LLM-->>IMA: 
+    IMA->>OBS: Log LLM interactions
     
     IMA->>JSM: Submit ticket
-    
-    JSM->>OBS: Log LLM interactions
