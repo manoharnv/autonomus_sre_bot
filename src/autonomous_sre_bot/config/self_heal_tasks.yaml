@@ -1,0 +1,106 @@
+# Autonomous SRE Self-Healing Crew - Task Configuration
+
+# Task 1: Monitor JIRA for New Incidents
+monitor_jira_incidents:
+  description: >
+    Monitor JIRA Service Management for new incidents that require automated resolution.
+    Search for recently created incidents with high priority or specific keywords that
+    indicate infrastructure or application issues. Filter for incidents that can be
+    automatically resolved based on predefined criteria.
+  expected_output: >
+    A structured report containing:
+    - List of new incidents requiring automated attention
+    - Priority assessment and SLA requirements
+    - Initial classification of incident types
+    - Recommendation on which incidents should proceed to automated resolution
+    Format: JSON with incident details, priority levels, and automation feasibility
+  agent: jira_monitor
+
+# Task 2: Analyze Root Cause in Kubernetes
+analyze_kubernetes_root_cause:
+  description: >
+    Perform comprehensive root cause analysis for the identified incidents by examining
+    Kubernetes cluster state, pod health, events, and logs. Correlate multiple data sources
+    to identify the underlying cause of the issue. Focus on resource constraints, configuration
+    issues, and application failures.
+  expected_output: >
+    A detailed root cause analysis report containing:
+    - Problematic pods and their current state
+    - Relevant Kubernetes events and error patterns
+    - Log analysis with key error messages
+    - Resource utilization assessment
+    - Root cause hypothesis with supporting evidence
+    - Confidence level in the analysis
+    Format: Structured analysis with evidence, hypothesis, and recommended fix approach
+  agent: root_cause_analyzer
+  context:
+    - monitor_jira_incidents
+
+# Task 3: Generate Automated Fix
+generate_code_fix:
+  description: >
+    Based on the root cause analysis, generate specific code fixes to resolve the identified
+    issues. Create Kubernetes manifest updates, configuration changes, or application fixes
+    as appropriate. Ensure fixes are minimal, targeted, and follow best practices.
+  expected_output: >
+    A comprehensive fix package containing:
+    - Specific code changes or configuration updates
+    - Kubernetes manifest modifications (if applicable)
+    - Environment variable or resource limit adjustments
+    - Test cases or validation criteria for the fix
+    - Implementation notes and rollback procedures
+    Format: Code files with clear diff-style changes and implementation instructions
+  agent: code_fix_generator
+  context:
+    - monitor_jira_incidents
+    - analyze_kubernetes_root_cause
+
+# Task 4: Create and Manage Pull Request
+create_fix_pull_request:
+  description: >
+    Create a pull request in the appropriate GitHub repository with the generated fixes.
+    Include proper documentation, link to the original incident, and set up appropriate
+    reviewers and labels. Ensure the PR follows established development workflows.
+  expected_output: >
+    A successfully created pull request with:
+    - Clear title and description linking to the incident
+    - All necessary code changes properly committed
+    - Appropriate labels and reviewers assigned
+    - CI/CD pipeline validation initiated
+    - PR URL and tracking information
+    Format: PR details with links, status, and next steps
+  agent: pr_manager
+  context:
+    - monitor_jira_incidents
+    - analyze_kubernetes_root_cause
+    - generate_code_fix
+
+# Task 5: Monitor Deployment and Verify Resolution
+monitor_deployment_verification:
+  description: >
+    Monitor the deployment of the fix through CI/CD pipeline and verify that the incident
+    is fully resolved. Check pod health, application metrics, and ensure no new issues
+    are introduced. Update the original JIRA incident with resolution status.
+  expected_output: >
+    A complete resolution verification report containing:
+    - Deployment status and success confirmation
+    - Post-deployment health checks and monitoring results
+    - Verification that the original issue is resolved
+    - Any new issues or side effects detected
+    - JIRA incident updated with resolution details
+    - Lessons learned and process improvements
+    Format: Final status report with deployment outcomes and incident closure
+  agent: deployment_monitor
+  context:
+    - monitor_jira_incidents
+    - analyze_kubernetes_root_cause
+    - generate_code_fix
+    - create_fix_pull_request
+
+# Crew-level Configuration
+crew_config:
+  process: sequential
+  verbose: 2
+  memory: true
+  max_rpm: 10
+  share_crew: false

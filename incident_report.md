@@ -1,16 +1,30 @@
-Successfully created Jira incident with all required details:
-- Key: SUP-43
-- Summary: "MiddlewareLogsTool Failure: Unable to Retrieve Logs from Middleware.io"
+Successfully created Jira Service Management incident with all required details:
+- Incident Key: SUP-46
+- Summary: "python-service-1: Repeated 'list index out of range' errors in get_todos function"
+- Priority: High
 - Type: Incident
-- Priority: High (justified by critical impact on monitoring systems and inability to perform root cause analysis)
-- URL: https://manoharnv.atlassian.net/browse/SUP-43
+- URL: https://manoharnv.atlassian.net/browse/SUP-46
 
 The incident includes:
-1. Comprehensive Incident Overview section
-2. Detailed Error Details in tabular format
-3. Root Cause Analysis with bullet points
-4. Impact Assessment table
-5. Actionable Recommendations
-6. Priority Justification section
+1. Comprehensive ADF-formatted description with:
+   - Incident Overview section
+   - Detailed Error Details in table format
+   - Root Cause Analysis with bullet points
+   - Impact Assessment table
+   - Recommended Actions list
+   - Priority Justification
 
-All content is properly formatted in Atlassian Document Format (ADF) with appropriate headings, tables, and bullet lists. The incident contains all key elements from the analysis report and follows the required structure.
+2. All required elements from the log analysis:
+   - Affected service (python-service-1)
+   - Specific error pattern ("list index out of range")
+   - Code location (/app/app.py line 373)
+   - Error frequency (10 errors in 1 minute)
+   - Isolated pod (faulty-app-ffc974bf5-l4g56)
+   - Clear action items for resolution
+
+3. Proper priority justification based on:
+   - Error frequency
+   - Business impact
+   - Potential user impact
+
+The incident is fully documented and ready for the operations team to address.

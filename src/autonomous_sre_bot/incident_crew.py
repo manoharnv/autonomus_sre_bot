@@ -22,7 +22,7 @@ class IncidentManagementCrew():
         return Agent(
             config=self.agents_config['log_collector'],
             tools=[MiddlewareLogsTool()],
-            verbose=True,
+            verbose=False,
             llm=self.llm
         )
     
@@ -30,7 +30,7 @@ class IncidentManagementCrew():
     def log_analyzer(self) -> Agent:
         return Agent(
             config=self.agents_config['log_analyzer'],
-            verbose=True,
+            verbose=False,
             llm=self.llm,
             reasoning=True
         )
@@ -40,7 +40,7 @@ class IncidentManagementCrew():
         return Agent(
             config=self.agents_config['incident_manager'],
             tools=[JSMIncidentCreatorTool()],
-            verbose=True,
+            verbose=False,
             llm=self.llm
         )
     
