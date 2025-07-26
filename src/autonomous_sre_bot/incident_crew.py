@@ -15,7 +15,11 @@ class IncidentManagementCrew():
     tasks_config = 'config/tasks.yaml'
     
     def __init__(self):
-        self.llm = LLM(model="deepseek/deepseek-chat")
+        self.llm = LLM(
+            model="deepseek-chat", 
+            base_url="https://api.deepseek.com/v1",
+            api_key=os.getenv('OPENAI_API_KEY')
+        )
     
     @agent
     def log_collector(self) -> Agent:

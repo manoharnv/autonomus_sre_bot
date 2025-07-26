@@ -11,7 +11,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 
-from .tools.mcp_jira_tool import get_jira_mcp_tools
+from .tools.crewai_jira_tools import get_jira_mcp_tools
 
 logger = logging.getLogger(__name__)
 

@@ -15,6 +15,26 @@ dependencies = [
     "opentelemetry-sdk>=1.27.0,<2.0.0",
     "opentelemetry-api>=1.27.0,<2.0.0",
     "opentelemetry-exporter-otlp>=1.27.0,<2.0.0",
+    # MCP integration dependencies
+    "mcp>=1.0.0",
+    "pyyaml>=6.0.0",
+    "requests>=2.31.0",
+    "aiohttp>=3.9.0",
+    "databricks-sdk>=0.59.0",
+    "crewai-tools[mcp]>=0.38.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.5.0",
+]
+mcp = [
+    "crewai-tools[mcp]>=0.15.0",
 ]
 
 [project.scripts]
@@ -24,6 +44,10 @@ train = "autonomous_sre_bot.main:train_incident_crew"
 replay = "autonomous_sre_bot.main:replay"
 test = "autonomous_sre_bot.main:test_incident_management"
 incident_management = "autonomous_sre_bot.main:run_incident_management"
+# Self-healing crew scripts
+self_heal = "autonomous_sre_bot.main_self_heal:main"
+self_heal_daemon = "autonomous_sre_bot.daemon_self_heal:main"
+test_self_heal = "autonomous_sre_bot.test_self_heal:main"
 
 [build-system]
 requires = [

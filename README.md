@@ -37,11 +37,12 @@ crewai install
    - `MIDDLEWARE_API_KEY`: Your Middleware.io API key for accessing log data
 
    **Jira Service Management (JSM) Configuration:**
-   - `JSM_CLOUD_ID`: Your Jira Cloud ID
-   - `JSM_ACCESS_TOKEN`: JSM access token
-   - `JSM_SERVICE_DESK_ID`: Service desk ID for incident creation
-   - `JSM_REQUEST_TYPE_ID`: Request type ID for incidents
-   - `JSM_USER_ID`: JSM user ID for incident creation
+   - `ATLASSIAN_CLOUD_ID`: Your Atlassian Cloud ID
+   - `ATLASSIAN_TOKEN`: Atlassian access token 
+   - `ATLASSIAN_SERVICE_DESK_ID`: Service desk ID for incident creation
+   - `ATLASSIAN_REQUEST_TYPE_ID`: Request type ID for incidents
+   - `ATLASSIAN_USER_ID`: Atlassian user ID for incident creation
+   - `ATLASSIAN_URL`: Your Atlassian instance URL
 
    **Langfuse Monitoring (Optional):**
    - `LANGFUSE_PUBLIC_KEY`: Langfuse public key

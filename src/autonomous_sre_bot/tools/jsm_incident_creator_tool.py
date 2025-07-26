@@ -49,13 +49,13 @@ class JSMIncidentCreatorTool(BaseTool):
     
     def __init__(self):
         super().__init__()
-        # Load configuration from environment variables
-        self.cloud_id = os.getenv('JSM_CLOUD_ID')
-        self.user_id = os.getenv('JSM_USER_ID')
-        self.access_token = os.getenv('JSM_ACCESS_TOKEN')
-        self.service_desk_id = os.getenv('JSM_SERVICE_DESK_ID')
-        self.request_type_id = os.getenv('JSM_REQUEST_TYPE_ID')
-        self.jira_url = os.getenv('JSM_URL', 'https://manoharnv.atlassian.net')
+                # Initialize JSM configuration using consolidated ATLASSIAN_ variables
+        self.cloud_id = os.getenv('ATLASSIAN_CLOUD_ID')
+        self.user_id = os.getenv('ATLASSIAN_USER_ID')
+        self.access_token = os.getenv('ATLASSIAN_TOKEN')
+        self.service_desk_id = os.getenv('ATLASSIAN_SERVICE_DESK_ID')
+        self.request_type_id = os.getenv('ATLASSIAN_REQUEST_TYPE_ID')
+        self.jira_url = os.getenv('ATLASSIAN_URL', 'https://manoharnv.atlassian.net')
         
         if not all([self.cloud_id, self.user_id, self.access_token, self.service_desk_id, self.request_type_id]):
             raise ValueError("Missing required JSM configuration. Please set all required environment variables.")
