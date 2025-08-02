@@ -7,7 +7,8 @@ import os
 from dotenv import load_dotenv
 import logging
 import json
-logging.basicConfig(level=logging.DEBUG)
+# Configure logging for this module only, not globally
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -128,13 +129,13 @@ class MiddlewareLogsTool(BaseTool):
                 "ApiKey": api_key
             }
             
-            # print the payload json for debugging
-            print(json.dumps(payload, indent=4))
+            # Log the payload for debugging in our logs, not console
+            logger.debug("Middleware API Request: %s", json.dumps(payload, indent=4))
             response = requests.post(self.base_url, json=payload, headers=headers)
             response.raise_for_status()
             
             result = response.json()
-            print(json.dumps(result, indent=4))
+            logger.debug("Middleware API Response: %s", json.dumps(result, indent=4))
             # Format the response in a readable way
             formatted_logs = self._format_logs(result)
             

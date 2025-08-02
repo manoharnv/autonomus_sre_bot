@@ -22,12 +22,73 @@ Integrates with GitHub for code analysis and PR management:
 - List commits
 
 ### 3. Kubernetes MCP Tool (`mcp_kubernetes_tool.py`)
-Integrates with Kubernetes for cluster monitoring:
-- Get pod status and details
-- Retrieve cluster events
-- Fetch pod logs
-- Describe pod configurations
-- Monitor deployments and services
+Integrates with containers/kubernetes-mcp-server for comprehensive cluster operations:
+
+**Features:**
+- **Pod Management**: List, get, delete, get logs, exec into pods, run containers
+- **Resource Operations**: Create, get, list, delete any Kubernetes resource
+- **Monitoring**: Get events, view configurations, resource usage metrics
+- **Helm Integration**: Install, list, and uninstall Helm charts
+- **Namespaces**: List and manage namespaces
+- **Native Implementation**: Uses containers/kubernetes-mcp-server (Go-based, no kubectl dependency)
+
+**Available MCP Tools:**
+- `kubernetes_resource_create`: Create any Kubernetes resource
+- `kubernetes_resource_get`: Get a specific Kubernetes resource  
+- `kubernetes_resource_list`: List Kubernetes resources
+- `kubernetes_resource_delete`: Delete a Kubernetes resource
+- `kubernetes_pod_list`: List pods in namespace(s)
+- `kubernetes_pod_get`: Get specific pod details
+- `kubernetes_pod_delete`: Delete a pod
+- `kubernetes_pod_logs`: Get pod logs
+- `kubernetes_pod_exec`: Execute commands in pod
+- `kubernetes_pod_run`: Run a container image as a pod
+- `kubernetes_pod_top`: Get resource usage for pods
+- `kubernetes_namespace_list`: List namespaces
+- `kubernetes_event_list`: List events
+- `kubernetes_configuration_view`: View current kubeconfig
+- `kubernetes_helm_install`: Install Helm chart
+- `kubernetes_helm_list`: List Helm releases
+- `kubernetes_helm_uninstall`: Uninstall Helm release
+
+**Usage Examples:**
+```python
+from tools.mcp_kubernetes_tool import get_kubernetes_mcp_tools, KubernetesMCPContext
+
+# Get all tools
+k8s_tools = get_kubernetes_mcp_tools()
+
+# Get specific tools for pod management
+pod_tools = get_kubernetes_mcp_tools([
+    'kubernetes_pod_list', 
+    'kubernetes_pod_get', 
+    'kubernetes_pod_logs'
+])
+
+# Use context manager (recommended)
+with KubernetesMCPContext(['kubernetes_pod_list']) as tools:
+    result = tools['kubernetes_pod_list'].run(namespace='production')
+
+# Convenience functions for common operations
+from tools.mcp_kubernetes_tool import (
+    get_problematic_pods,
+    get_recent_events, 
+    get_pod_logs_for_issue,
+    analyze_pod_resource_usage,
+    correlate_pod_events_and_logs
+)
+
+# Get pods with issues
+problematic_pods = get_problematic_pods('production')
+
+# Comprehensive pod analysis
+analysis = correlate_pod_events_and_logs('production', 'my-app-pod-123')
+```
+
+**Requirements:**
+- Node.js and npm (for npx to run kubernetes-mcp-server)  
+- Valid kubeconfig file (~/.kube/config or KUBECONFIG env var)
+- Network access to Kubernetes cluster
 - Analyze resource usage
 
 ## 🔧 Setup

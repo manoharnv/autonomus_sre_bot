@@ -602,3 +602,5 @@ When adding new incident types or fixes:
 ## License
 
 This project is part of the Autonomous SRE Bot capstone project.
+
+python -m src.autonomous_sre_bot.self_heal_crew

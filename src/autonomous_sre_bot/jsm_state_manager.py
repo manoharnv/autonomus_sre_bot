@@ -11,7 +11,17 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 
-from .tools.crewai_jira_tools import get_jira_mcp_tools
+try:
+    from .tools.jsm_comprehensive_tool import JSMComprehensiveTool
+    from .tools.jsm_specialized_tools import JSMIncidentUpdaterTool, JSMServiceDeskMonitorTool
+except ImportError:
+    # Handle direct execution
+    import sys
+    import os
+    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    
+    from autonomous_sre_bot.tools.jsm_comprehensive_tool import JSMComprehensiveTool
+    from autonomous_sre_bot.tools.jsm_specialized_tools import JSMIncidentUpdaterTool, JSMServiceDeskMonitorTool
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +54,11 @@ class JSMStateManager:
     def __init__(self, config_path: str = "src/autonomous_sre_bot/config"):
         self.config_path = config_path
         self.workflow_config = self._load_workflow_config()
-        self.jira_tools = get_jira_mcp_tools([
-            'search_jira_issues',
-            'get_jira_issue', 
-            'add_jira_comment',
-            'transition_jira_issue',
-            'edit_jira_issue'
-        ])
+        
+        # Initialize JSM tools
+        self.jsm_comprehensive = JSMComprehensiveTool()
+        self.jsm_updater = JSMIncidentUpdaterTool()
+        self.jsm_monitor = JSMServiceDeskMonitorTool()
         
         # Setup logging
         self._setup_logging()
@@ -86,9 +94,12 @@ class JSMStateManager:
             Tuple of (current_state, incident_data)
         """
         try:
-            # Get incident details from JIRA
-            result = self.jira_tools.run(tool_name='get_jira_issue', issue_key=incident_key)
-            incident_data = json.loads(result)
+            # Get incident details from JIRA using JSM comprehensive tool
+            result = self.jsm_comprehensive._run(
+                operation="get_request", 
+                issue_id_or_key=incident_key
+            )
+            incident_data = json.loads(result) if isinstance(result, str) else result
             
             # Map JSM status to workflow state
             jsm_status = incident_data.get('fields', {}).get('status', {}).get('name', '')
@@ -130,11 +141,11 @@ class JSMStateManager:
                 logger.warning(f"Invalid transition from {current_state.name} to {new_state.name}")
                 return False
             
-            # Transition the JIRA ticket status
-            transition_result = self.jira_tools.run(
-                tool_name='transition_jira_issue',
-                issue_key=incident_key,
-                status=new_state.value
+            # Transition the JIRA ticket status using JSM updater
+            transition_result = self.jsm_updater._run(
+                incident_key=incident_key,
+                update_type="status_change",
+                content=f"Transitioning to: {new_state.value}"
             )
             
             # Add workflow metadata as comment
@@ -148,10 +159,10 @@ class JSMStateManager:
                     }
                 }
                 
-                self.jira_tools.run(
-                    tool_name='add_jira_comment',
-                    issue_key=incident_key,
-                    comment=f"Workflow State Transition:\n```json\n{json.dumps(comment_data, indent=2)}\n```"
+                self.jsm_updater._run(
+                    incident_key=incident_key,
+                    update_type="workflow_transition",
+                    content=f"Workflow State Transition:\n```json\n{json.dumps(comment_data, indent=2)}\n```"
                 )
             
             logger.info(f"Transitioned {incident_key} from {current_state.name} to {new_state.name}")
@@ -181,23 +192,80 @@ class JSMStateManager:
             # Search JIRA for incidents in these states
             jql = f"project = INC AND ({status_query}) ORDER BY created DESC"
             
-            result = self.jira_tools.run(
-                tool_name='search_jira_issues',
-                jql=jql,
-                max_results=max_results
+            # Search for incidents using the JSM service desk monitor
+            # Note: Since the monitor tool doesn't support JQL directly, 
+            # we'll use the open_incidents query type and filter results
+            result = self.jsm_monitor._run(
+                query_type="open_incidents"
             )
             
-            incidents = json.loads(result).get('issues', [])
+            # Parse the result
+            if isinstance(result, str):
+                # Check if it's a success message indicating no incidents
+                if "No open high-priority incidents found" in result or "✅" in result:
+                    logger.info(f"JSM response indicates no incidents: {result}")
+                    return []
+                
+                # Check if it's a formatted response with embedded JSON
+                if "🚨 Open high-priority incidents" in result and "found):" in result:
+                    try:
+                        # Extract JSON part from formatted response
+                        json_start = result.find("):")
+                        if json_start != -1:
+                            json_part = result[json_start + 2:].strip()
+                            incidents = json.loads(json_part)
+                            logger.info(f"Successfully parsed {len(incidents)} incidents from formatted response")
+                        else:
+                            logger.error(f"Could not find JSON in formatted response: {result}")
+                            return []
+                    except json.JSONDecodeError as e:
+                        logger.error(f"Failed to parse JSON from formatted response: {e}")
+                        logger.error(f"Response was: {result}")
+                        return []
+                else:
+                    # Try to parse as regular JSON
+                    try:
+                        data = json.loads(result)
+                        if isinstance(data, dict):
+                            incidents = data.get('issues', []) if 'issues' in data else data.get('values', [])
+                        elif isinstance(data, list):
+                            incidents = data
+                        else:
+                            logger.warning(f"Unexpected data type from JSM: {type(data)}")
+                            incidents = []
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse JSM response: {result}")
+                        return []
+            else:
+                incidents = result.get('issues', []) if isinstance(result, dict) else []
             
             # Enrich with workflow state information
             enriched_incidents = []
             for incident in incidents:
-                jsm_status = incident.get('fields', {}).get('status', {}).get('name', '')
+                # Handle different incident formats
+                if 'fields' in incident:
+                    # Standard JIRA API format
+                    jsm_status = incident.get('fields', {}).get('status', {}).get('name', '')
+                    incident_key = incident.get('key', 'Unknown')
+                else:
+                    # Service desk monitor format
+                    jsm_status = incident.get('status', '')
+                    incident_key = incident.get('key', 'Unknown')
+                
                 workflow_state = self._map_jsm_status_to_workflow_state(jsm_status)
                 
-                incident['workflow_state'] = workflow_state.name
-                incident['workflow_metadata'] = self._extract_workflow_metadata(incident)
-                enriched_incidents.append(incident)
+                # Create enriched incident with consistent format
+                enriched_incident = {
+                    'key': incident_key,
+                    'summary': incident.get('summary', 'No summary'),
+                    'status': jsm_status,
+                    'priority': incident.get('priority', 'Unknown'),
+                    'created': incident.get('created', 'Unknown'),
+                    'reporter': incident.get('reporter', 'Unknown'),
+                    'workflow_state': workflow_state.name,
+                    'workflow_metadata': self._extract_workflow_metadata(incident)
+                }
+                enriched_incidents.append(enriched_incident)
             
             logger.info(f"Found {len(enriched_incidents)} incidents in states: {[s.name for s in states]}")
             return enriched_incidents
@@ -259,10 +327,10 @@ class JSMStateManager:
                 }
             }
             
-            self.jira_tools.run(
-                tool_name='add_jira_comment',
-                issue_key=incident_key,
-                comment=f"Workflow Metadata Update:\n```json\n{json.dumps(comment_data, indent=2)}\n```"
+            self.jsm_updater._run(
+                incident_key=incident_key,
+                update_type="metadata_update",
+                content=f"Workflow Metadata Update:\n```json\n{json.dumps(comment_data, indent=2)}\n```"
             )
             
             logger.info(f"Updated metadata for {incident_key}")
@@ -274,9 +342,29 @@ class JSMStateManager:
     
     def _map_jsm_status_to_workflow_state(self, jsm_status: str) -> WorkflowState:
         """Map JSM status to workflow state enum"""
+        # First try exact match
         for state in WorkflowState:
             if state.value == jsm_status:
                 return state
+        
+        # Handle common JSM status mappings
+        status_mappings = {
+            'Open': WorkflowState.INCIDENT_DETECTED,
+            'New': WorkflowState.INCIDENT_DETECTED,
+            'To Do': WorkflowState.INCIDENT_DETECTED,
+            'In Progress': WorkflowState.ANALYSIS_IN_PROGRESS,
+            'Under Review': WorkflowState.PR_UNDER_REVIEW,
+            'Done': WorkflowState.INCIDENT_RESOLVED,
+            'Closed': WorkflowState.INCIDENT_RESOLVED,
+            'Resolved': WorkflowState.INCIDENT_RESOLVED,
+            'Cancelled': WorkflowState.INCIDENT_FAILED,
+            'Failed': WorkflowState.INCIDENT_FAILED
+        }
+        
+        mapped_state = status_mappings.get(jsm_status)
+        if mapped_state:
+            logger.info(f"Mapped JSM status '{jsm_status}' to workflow state '{mapped_state.name}'")
+            return mapped_state
         
         # Default to detected if unknown status
         logger.warning(f"Unknown JSM status '{jsm_status}', defaulting to INCIDENT_DETECTED")

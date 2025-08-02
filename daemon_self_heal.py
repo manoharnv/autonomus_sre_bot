@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from autonomous_sre_bot.self_heal_crew import create_self_healing_crew
+from autonomous_sre_bot.logging_config import setup_logging
 from autonomous_sre_bot.jsm_state_manager import create_jsm_state_manager
 
 class SelfHealingDaemon:
@@ -26,36 +27,23 @@ class SelfHealingDaemon:
     """
     
     def __init__(self, config_path: str = "src/autonomous_sre_bot/config", 
-                 poll_interval: int = 300):  # 5 minutes default
+                 poll_interval: int = 300, log_level: str = "INFO"):  # 5 minutes default
         self.config_path = config_path
         self.poll_interval = poll_interval
+        self.log_level = log_level
         self.running = False
         
-        # Initialize components
-        self.crew = create_self_healing_crew(config_path)
-        self.state_manager = create_jsm_state_manager(config_path)
-        
-        # Setup logging
-        self._setup_logging()
+        # Setup logging first
+        setup_logging(log_level)
         self.logger = logging.getLogger(__name__)
+        
+        # Initialize components
+        self.crew = create_self_healing_crew(config_path, log_level)
+        self.state_manager = create_jsm_state_manager(config_path)
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
-    
-    def _setup_logging(self):
-        """Setup daemon logging"""
-        Path("logs").mkdir(exist_ok=True)
-        
-        # Create daemon-specific logger
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler("logs/self_heal_daemon.log"),
-                logging.StreamHandler(sys.stdout)
-            ]
-        )
     
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
@@ -234,7 +222,8 @@ def main():
         # Create daemon
         daemon = SelfHealingDaemon(
             config_path=args.config_path,
-            poll_interval=args.poll_interval
+            poll_interval=args.poll_interval,
+            log_level=args.log_level
         )
         
         if args.status:

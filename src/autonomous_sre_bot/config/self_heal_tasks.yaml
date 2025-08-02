@@ -4,16 +4,22 @@
 monitor_jira_incidents:
   description: >
     Monitor JIRA Service Management for new incidents that require automated resolution.
-    Search for recently created incidents with high priority or specific keywords that
-    indicate infrastructure or application issues. Filter for incidents that can be
-    automatically resolved based on predefined criteria.
+    Use the JSM monitoring tools to search for recently created incidents with high priority 
+    or specific keywords that indicate infrastructure or application issues. Filter for incidents 
+    that can be automatically resolved based on predefined criteria.
+    
+    Tools available:
+    - jsm_monitor_service_desk: Monitor queues and recent requests
+    - jsm_search_knowledge: Search for existing solutions
+    - jsm_monitor_sla: Check SLA status for prioritization
   expected_output: >
     A structured report containing:
-    - List of new incidents requiring automated attention
-    - Priority assessment and SLA requirements
+    - List of new incidents requiring automated attention with JSM keys
+    - Priority assessment and SLA requirements from JSM data
     - Initial classification of incident types
+    - Knowledge base search results for similar issues
     - Recommendation on which incidents should proceed to automated resolution
-    Format: JSON with incident details, priority levels, and automation feasibility
+    Format: JSON with incident details, priority levels, SLA status, and automation feasibility
   agent: jira_monitor
 
 # Task 2: Analyze Root Cause in Kubernetes
@@ -22,7 +28,12 @@ analyze_kubernetes_root_cause:
     Perform comprehensive root cause analysis for the identified incidents by examining
     Kubernetes cluster state, pod health, events, and logs. Correlate multiple data sources
     to identify the underlying cause of the issue. Focus on resource constraints, configuration
-    issues, and application failures.
+    issues, and application failures. Update the JSM incident with analysis findings.
+    
+    Tools available:
+    - jsm_update_incident: Add root cause analysis to the incident
+    - jsm_create_incident: Create new incidents if additional issues found
+    - Kubernetes analysis tools for cluster inspection
   expected_output: >
     A detailed root cause analysis report containing:
     - Problematic pods and their current state
@@ -31,7 +42,8 @@ analyze_kubernetes_root_cause:
     - Resource utilization assessment
     - Root cause hypothesis with supporting evidence
     - Confidence level in the analysis
-    Format: Structured analysis with evidence, hypothesis, and recommended fix approach
+    - JSM incident updated with analysis findings
+    Format: Structured analysis with evidence, hypothesis, recommended fix approach, and JSM update confirmation
   agent: root_cause_analyzer
   context:
     - monitor_jira_incidents
@@ -42,6 +54,11 @@ generate_code_fix:
     Based on the root cause analysis, generate specific code fixes to resolve the identified
     issues. Create Kubernetes manifest updates, configuration changes, or application fixes
     as appropriate. Ensure fixes are minimal, targeted, and follow best practices.
+    Update the JSM incident with progress and technical details.
+    
+    Tools available:
+    - jsm_update_incident: Add progress updates and technical findings
+    - Code generation and fix creation tools
   expected_output: >
     A comprehensive fix package containing:
     - Specific code changes or configuration updates
@@ -49,7 +66,8 @@ generate_code_fix:
     - Environment variable or resource limit adjustments
     - Test cases or validation criteria for the fix
     - Implementation notes and rollback procedures
-    Format: Code files with clear diff-style changes and implementation instructions
+    - JSM incident updated with fix details and progress
+    Format: Code files with clear diff-style changes, implementation instructions, and JSM update confirmation
   agent: code_fix_generator
   context:
     - monitor_jira_incidents
@@ -80,16 +98,22 @@ monitor_deployment_verification:
   description: >
     Monitor the deployment of the fix through CI/CD pipeline and verify that the incident
     is fully resolved. Check pod health, application metrics, and ensure no new issues
-    are introduced. Update the original JIRA incident with resolution status.
+    are introduced. Update the original JIRA incident with resolution status and close it.
+    
+    Tools available:
+    - jsm_resolve_incident: Mark incident as resolved
+    - jsm_update_incident: Add final resolution details
+    - jsm_monitor_sla: Verify SLA compliance post-resolution
   expected_output: >
     A complete resolution verification report containing:
     - Deployment status and success confirmation
     - Post-deployment health checks and monitoring results
     - Verification that the original issue is resolved
     - Any new issues or side effects detected
-    - JIRA incident updated with resolution details
+    - JIRA incident updated with resolution details and closed
+    - SLA compliance verification
     - Lessons learned and process improvements
-    Format: Final status report with deployment outcomes and incident closure
+    Format: Final status report with deployment outcomes, incident closure confirmation, and JSM resolution
   agent: deployment_monitor
   context:
     - monitor_jira_incidents
