@@ -1,152 +1,96 @@
-# JSM State-Driven Workflow Configuration
+# JSM State-Driven Workflow Configuration - Simplified
 
-# Workflow States mapped to JSM ticket statuses
+# Simplified Workflow States mapped to JSM ticket statuses
 workflow_states:
-  # Initial states
-  INCIDENT_DETECTED: "To Do"
-  ANALYSIS_IN_PROGRESS: "In Progress" 
-  ANALYSIS_COMPLETE: "Analysis Complete"
-  
-  # Fix generation states
-  FIX_GENERATION_IN_PROGRESS: "Generating Fix"
-  FIX_GENERATED: "Fix Generated"
-  
-  # PR management states  
-  PR_CREATION_IN_PROGRESS: "Creating PR"
-  PR_CREATED: "PR Created"
-  PR_UNDER_REVIEW: "Under Review"
-  PR_APPROVED: "PR Approved"
-  PR_MERGED: "PR Merged"
-  
-  # Deployment states
-  DEPLOYMENT_IN_PROGRESS: "Deploying"
-  DEPLOYMENT_COMPLETE: "Deployed"
-  
-  # Verification states
-  VERIFICATION_IN_PROGRESS: "Verifying Fix"
-  VERIFICATION_COMPLETE: "Verification Complete"
-  
-  # Final states
-  INCIDENT_RESOLVED: "Done"
-  INCIDENT_FAILED: "Failed"
-  INCIDENT_REQUIRES_HUMAN: "Needs Human Intervention"
+  TODO: "To Do"
+  IN_PROGRESS: "In Progress"
+  RCA_COMPLETED: "RCA Completed"
+  CODE_FIX_COMPLETED: "Code Fix Completed"
+  DEPLOYMENT_DONE: "Deployment Done"
+  DEPLOYMENT_VALIDATED: "Deployment Validated"
+  RESOLVED: "Done"
+  FAILED: "Failed"
+  REQUIRES_HUMAN: "Needs Human Intervention"
 
-# State transitions and responsible agents
+# Simplified State transitions and responsible agents
 state_transitions:
-  INCIDENT_DETECTED:
+  TODO:
     agent: "jira_monitor"
-    next_states: ["ANALYSIS_IN_PROGRESS", "INCIDENT_REQUIRES_HUMAN"]
+    next_states: ["IN_PROGRESS", "REQUIRES_HUMAN"]
     max_retry_count: 3
+    description: "New incident needs analysis"
     
-  ANALYSIS_IN_PROGRESS:
+  IN_PROGRESS:
     agent: "root_cause_analyzer"
-    next_states: ["ANALYSIS_COMPLETE", "INCIDENT_REQUIRES_HUMAN"]
-    max_retry_count: 2
-    timeout_minutes: 30
-    
-  ANALYSIS_COMPLETE:
-    agent: "code_fix_generator"
-    next_states: ["FIX_GENERATION_IN_PROGRESS"]
-    auto_transition: true
-    
-  FIX_GENERATION_IN_PROGRESS:
-    agent: "code_fix_generator"
-    next_states: ["FIX_GENERATED", "INCIDENT_REQUIRES_HUMAN"]
+    next_states: ["RCA_COMPLETED", "REQUIRES_HUMAN"]
     max_retry_count: 2
     timeout_minutes: 45
+    description: "Root cause analysis in progress"
     
-  FIX_GENERATED:
-    agent: "pr_manager"
-    next_states: ["PR_CREATION_IN_PROGRESS"]
-    auto_transition: true
+  RCA_COMPLETED:
+    agent: "code_fix_generator"
+    next_states: ["CODE_FIX_COMPLETED", "REQUIRES_HUMAN"]
+    max_retry_count: 2
+    timeout_minutes: 60
+    description: "Generate and implement code fix"
     
-  PR_CREATION_IN_PROGRESS:
-    agent: "pr_manager"
-    next_states: ["PR_CREATED", "INCIDENT_REQUIRES_HUMAN"]
+  CODE_FIX_COMPLETED:
+    agent: "deployment_monitor"
+    next_states: ["DEPLOYMENT_DONE", "REQUIRES_HUMAN"]
+    max_retry_count: 3
+    timeout_minutes: 30
+    description: "Deploy fix to production"
+    
+  DEPLOYMENT_DONE:
+    agent: "deployment_monitor"
+    next_states: ["DEPLOYMENT_VALIDATED", "REQUIRES_HUMAN"]
     max_retry_count: 2
     timeout_minutes: 15
+    verification_wait_minutes: 10
+    description: "Validate deployment and verify fix"
     
-  PR_CREATED:
-    # Human intervention point - waiting for review
-    agent: "pr_manager"
-    next_states: ["PR_UNDER_REVIEW", "PR_APPROVED", "INCIDENT_REQUIRES_HUMAN"]
-    requires_human: true
-    check_interval_minutes: 30
-    max_wait_hours: 24
-    
-  PR_UNDER_REVIEW:
-    # Human intervention point - waiting for approval  
-    agent: "pr_manager"
-    next_states: ["PR_APPROVED", "INCIDENT_REQUIRES_HUMAN"]
-    requires_human: true
-    check_interval_minutes: 60
-    max_wait_hours: 48
-    
-  PR_APPROVED:
-    # Can be automated or require human merge
-    agent: "pr_manager"
-    next_states: ["PR_MERGED", "INCIDENT_REQUIRES_HUMAN"]
-    auto_merge_if_approved: true
-    max_retry_count: 3
-    
-  PR_MERGED:
+  DEPLOYMENT_VALIDATED:
     agent: "deployment_monitor"
-    next_states: ["DEPLOYMENT_IN_PROGRESS"]
+    next_states: ["RESOLVED"]
     auto_transition: true
-    wait_for_ci_cd: true
-    
-  DEPLOYMENT_IN_PROGRESS:
-    agent: "deployment_monitor"
-    next_states: ["DEPLOYMENT_COMPLETE", "INCIDENT_REQUIRES_HUMAN"]
-    monitor_interval_minutes: 5
-    max_wait_minutes: 60
-    
-  DEPLOYMENT_COMPLETE:
-    agent: "deployment_monitor"
-    next_states: ["VERIFICATION_IN_PROGRESS"]
-    auto_transition: true
-    
-  VERIFICATION_IN_PROGRESS:
-    agent: "deployment_monitor"
-    next_states: ["VERIFICATION_COMPLETE", "INCIDENT_REQUIRES_HUMAN"]
-    verification_wait_minutes: 15
-    max_retry_count: 3
-    
-  VERIFICATION_COMPLETE:
-    agent: "deployment_monitor"  
-    next_states: ["INCIDENT_RESOLVED"]
-    auto_transition: true
+    description: "Mark incident as resolved"
 
 # Polling configuration for state checks
 polling_config:
-  default_interval_minutes: 15
-  max_polling_hours: 72
+  default_interval_minutes: 10
+  max_polling_hours: 24
   exponential_backoff: true
-  max_backoff_minutes: 120
+  max_backoff_minutes: 30
 
-# Escalation rules
+# Simplified escalation rules
 escalation_rules:
-  # If stuck in human review too long
-  PR_UNDER_REVIEW:
-    escalate_after_hours: 24
-    escalate_to_status: "INCIDENT_REQUIRES_HUMAN"
+  # If analysis takes too long
+  IN_PROGRESS:
+    escalate_after_hours: 2
+    escalate_to_status: "REQUIRES_HUMAN"
     escalate_assignee: "sre-team-lead"
     
+  # If code fix takes too long
+  RCA_COMPLETED:
+    escalate_after_hours: 3
+    escalate_to_status: "REQUIRES_HUMAN"
+    escalate_assignee: "dev-team"
+    
   # If deployment takes too long
-  DEPLOYMENT_IN_PROGRESS:
-    escalate_after_minutes: 120
-    escalate_to_status: "INCIDENT_REQUIRES_HUMAN"
+  CODE_FIX_COMPLETED:
+    escalate_after_hours: 1
+    escalate_to_status: "REQUIRES_HUMAN"
     escalate_assignee: "devops-team"
     
-  # If verification fails repeatedly
-  VERIFICATION_IN_PROGRESS:
-    escalate_after_retries: 5
-    escalate_to_status: "INCIDENT_REQUIRES_HUMAN"
+  # If validation fails
+  DEPLOYMENT_DONE:
+    escalate_after_minutes: 30
+    escalate_to_status: "REQUIRES_HUMAN"
     escalate_assignee: "sre-team"
 
 # Retry and timeout configuration
 retry_config:
-  default_max_retries: 3
+  default_max_retries: 2
   default_timeout_minutes: 30
-  exponential_backoff_factor: 2
+  exponential_backoff_factor: 1.5
   max_backoff_minutes: 60

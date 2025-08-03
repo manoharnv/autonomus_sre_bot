@@ -48,52 +48,46 @@ analyze_kubernetes_root_cause:
   context:
     - monitor_jira_incidents
 
-# Task 3: Generate Automated Fix
-generate_code_fix:
+# Task 3: Generate Automated Fix and Create Pull Request
+generate_code_fix_and_pr:
   description: >
     Based on the root cause analysis, generate specific code fixes to resolve the identified
-    issues. Create Kubernetes manifest updates, configuration changes, or application fixes
-    as appropriate. Ensure fixes are minimal, targeted, and follow best practices.
-    Update the JSM incident with progress and technical details.
+    issues and create a pull request with the changes. Create Kubernetes manifest updates, 
+    configuration changes, or application fixes as appropriate. Ensure fixes are minimal, 
+    targeted, and follow best practices. Then create a new branch using the JSM ticket ID 
+    and submit a pull request.
+    
+    Workflow:
+    1. Generate the specific code fixes based on root cause analysis
+    2. Create a new branch with format: {JSM_TICKET_ID}-automated-fix
+    3. Commit changes to the new branch
+    4. Create pull request with proper title and description
+    5. Update JSM incident with PR details and progress
     
     Tools available:
-    - jsm_update_incident: Add progress updates and technical findings
+    - jsm_update_incident: Add progress updates, technical findings, and PR links
+    - GitHub MCP tools: repo access, file operations, branch creation, PR management
     - Code generation and fix creation tools
   expected_output: >
-    A comprehensive fix package containing:
+    A comprehensive fix and PR package containing:
     - Specific code changes or configuration updates
-    - Kubernetes manifest modifications (if applicable)
+    - Kubernetes manifest modifications (if applicable)  
     - Environment variable or resource limit adjustments
     - Test cases or validation criteria for the fix
+    - New branch created with JSM ticket ID prefix
+    - Pull request created with proper documentation
+    - PR title format: [{JSM_TICKET_ID}] Automated fix for {issue_summary}
+    - PR description linking back to JSM incident
     - Implementation notes and rollback procedures
-    - JSM incident updated with fix details and progress
-    Format: Code files with clear diff-style changes, implementation instructions, and JSM update confirmation
+    - JSM incident updated with fix details, PR URL, and progress
+    Format: Combined fix implementation and PR creation report with links and JSM update confirmation
   agent: code_fix_generator
   context:
     - monitor_jira_incidents
     - analyze_kubernetes_root_cause
 
-# Task 4: Create and Manage Pull Request
-create_fix_pull_request:
-  description: >
-    Create a pull request in the appropriate GitHub repository with the generated fixes.
-    Include proper documentation, link to the original incident, and set up appropriate
-    reviewers and labels. Ensure the PR follows established development workflows.
-  expected_output: >
-    A successfully created pull request with:
-    - Clear title and description linking to the incident
-    - All necessary code changes properly committed
-    - Appropriate labels and reviewers assigned
-    - CI/CD pipeline validation initiated
-    - PR URL and tracking information
-    Format: PR details with links, status, and next steps
-  agent: pr_manager
-  context:
-    - monitor_jira_incidents
-    - analyze_kubernetes_root_cause
-    - generate_code_fix
-
-# Task 5: Monitor Deployment and Verify Resolution
+# Task 4: Monitor Deployment and Verify Resolution
+monitor_deployment_verification:
 monitor_deployment_verification:
   description: >
     Monitor the deployment of the fix through CI/CD pipeline and verify that the incident
@@ -118,8 +112,7 @@ monitor_deployment_verification:
   context:
     - monitor_jira_incidents
     - analyze_kubernetes_root_cause
-    - generate_code_fix
-    - create_fix_pull_request
+    - generate_code_fix_and_pr
 
 # Crew-level Configuration
 crew_config:

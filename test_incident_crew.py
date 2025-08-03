@@ -10,7 +10,7 @@ from datetime import datetime
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from autonomous_sre_bot.self_heal_crew import SelfHealCrew
+from autonomous_sre_bot.self_heal_crew import SelfHealingCrew
 
 def test_incident_crew():
     """Test the incident-specific crew execution"""
@@ -18,7 +18,7 @@ def test_incident_crew():
     
     try:
         # Initialize the crew
-        crew_manager = SelfHealCrew()
+        crew_manager = SelfHealingCrew()
         print("✅ Crew initialized successfully")
         
         # Test with a sample incident

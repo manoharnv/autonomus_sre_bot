@@ -16,26 +16,12 @@ from .jsm_comprehensive_tool import JSMComprehensiveTool, JSMConfig
 logger = logging.getLogger(__name__)
 
 # Input schemas for specialized tools
-class IncidentCreationInput(BaseModel):
-    """Input for creating incidents"""
-    title: str = Field(..., description="Incident title/summary")
-    description: str = Field(..., description="Detailed incident description")
-    priority: str = Field(default="High", description="Incident priority: Highest, High, Medium, Low, Lowest")
-    component: Optional[str] = Field(None, description="Affected component or service")
-    severity: Optional[str] = Field(None, description="Incident severity level")
-
 class IncidentUpdateInput(BaseModel):
     """Input for updating incidents"""
     incident_key: str = Field(..., description="Incident key (e.g., INC-123)")
     update_type: str = Field(..., description="Type of update: analysis, progress, resolution")
     content: str = Field(..., description="Update content")
     internal_only: bool = Field(default=True, description="Whether update is internal only")
-
-class IncidentTransitionInput(BaseModel):
-    """Input for transitioning incidents"""
-    incident_key: str = Field(..., description="Incident key")
-    action: str = Field(..., description="Transition action: resolve, close, reopen, escalate")
-    comment: Optional[str] = Field(None, description="Transition comment")
 
 class ServiceDeskQueryInput(BaseModel):
     """Input for service desk queries"""
@@ -46,68 +32,6 @@ class KnowledgeSearchInput(BaseModel):
     search_query: str = Field(..., description="Search terms for knowledge base")
     service_desk_id: Optional[str] = Field(None, description="Limit search to specific service desk")
     max_results: int = Field(default=10, description="Maximum number of results")
-
-class JSMIncidentCreatorTool(BaseTool):
-    """Specialized tool for creating incidents in JSM"""
-    name: str = "jsm_create_incident"
-    description: str = (
-        "Create incidents in Jira Service Management for the self-healing crew. "
-        "This tool automatically creates properly formatted incidents with all required fields."
-    )
-    args_schema: Type[BaseModel] = IncidentCreationInput
-    
-    @property
-    def jsm_tool(self):
-        """Get JSM tool instance"""
-        if not hasattr(self, '_jsm_tool'):
-            self._jsm_tool = JSMComprehensiveTool()
-        return self._jsm_tool
-    
-    @property
-    def config(self):
-        """Get configuration"""
-        if not hasattr(self, '_config'):
-            self._config = JSMConfig()
-        return self._config
-    
-    @property
-    def incident_request_type_id(self):
-        """Get request type ID"""
-        return os.getenv('ATLASSIAN_INCIDENT_REQUEST_TYPE_ID', '1')
-    
-    def _run(self, title: str, description: str, priority: str = "High", 
-             component: str = None, severity: str = None) -> str:
-        """Create incident in JSM"""
-        try:
-            # Enhance description with metadata
-            enhanced_description = f"""
-## Incident Details
-**Component:** {component or 'Unknown'}
-**Severity:** {severity or 'TBD'}
-**Created by:** Autonomous SRE Bot
-**Timestamp:** {datetime.now().isoformat()}
-
-## Description
-{description}
-
-## Next Steps
-- Root cause analysis in progress
-- Automated remediation being evaluated
-- Will update with findings shortly
-"""
-            
-            result = self.jsm_tool.create_customer_request(
-                service_desk_id=self.config.service_desk_id,
-                request_type_id=self.incident_request_type_id,
-                summary=title,
-                description=enhanced_description,
-                priority=priority
-            )
-            
-            return f"✅ Incident created successfully: {result}"
-            
-        except Exception as e:
-            return f"❌ Failed to create incident: {str(e)}"
 
 class JSMIncidentUpdaterTool(BaseTool):
     """Tool for updating incidents with analysis and progress"""
@@ -167,71 +91,6 @@ class JSMIncidentUpdaterTool(BaseTool):
             
         except Exception as e:
             return f"❌ Failed to update incident {incident_key}: {str(e)}"
-
-class JSMIncidentResolverTool(BaseTool):
-    """Tool for resolving and transitioning incidents"""
-    name: str = "jsm_resolve_incident"
-    description: str = (
-        "Resolve incidents or transition them to different states. "
-        "Use this when automated fixes have been applied and verified."
-    )
-    args_schema: Type[BaseModel] = IncidentTransitionInput
-    
-    @property
-    def jsm_tool(self):
-        """Get JSM tool instance"""
-        if not hasattr(self, '_jsm_tool'):
-            self._jsm_tool = JSMComprehensiveTool()
-        return self._jsm_tool
-    
-    def _run(self, incident_key: str, action: str, comment: str = None) -> str:
-        """Transition incident to new state"""
-        try:
-            # Get available transitions first
-            transitions_result = self.jsm_tool.get_request_transitions(incident_key)
-            transitions_data = json.loads(transitions_result)
-            
-            # Map actions to common transition IDs (these may need adjustment based on your workflow)
-            action_mapping = {
-                'resolve': ['Resolve Issue', 'Done', 'Resolved'],
-                'close': ['Close Issue', 'Closed'],
-                'reopen': ['Reopen Issue', 'Reopened', 'To Do'],
-                'escalate': ['Escalate', 'In Progress']
-            }
-            
-            # Find appropriate transition
-            transition_id = None
-            available_transitions = transitions_data.get('values', [])
-            
-            for transition in available_transitions:
-                transition_name = transition.get('name', '')
-                if any(keyword.lower() in transition_name.lower() 
-                      for keyword in action_mapping.get(action, [])):
-                    transition_id = transition.get('id')
-                    break
-            
-            if not transition_id:
-                return f"❌ No suitable transition found for action '{action}'. Available transitions: {[t.get('name') for t in available_transitions]}"
-            
-            # Add timestamp to comment
-            final_comment = f"""
-**Action:** {action.title()}
-**Timestamp:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
-**Performed by:** Autonomous SRE Bot
-
-{comment or f'Incident {action}d automatically by self-healing system.'}
-"""
-            
-            result = self.jsm_tool.transition_request(
-                issue_id_or_key=incident_key,
-                transition_id=transition_id,
-                comment=final_comment
-            )
-            
-            return f"✅ Incident {incident_key} transitioned to '{action}': {result}"
-            
-        except Exception as e:
-            return f"❌ Failed to transition incident {incident_key}: {str(e)}"
 
 class JSMServiceDeskMonitorTool(BaseTool):
     """Tool for monitoring service desk queues and requests"""

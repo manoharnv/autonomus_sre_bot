@@ -1,6 +1,6 @@
 """
-Autonomous SRE Self-Healing Crew
-Implements a five-agent crew for automated incident detection, analysis, and resolution
+Autonomous SRE Self-Healing Crew - Refactored Architecture
+Agent-driven incident resolution using JSM State Manager as tools
 """
 
 import os
@@ -16,14 +16,15 @@ from .logging_config import setup_logging
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai.memory import LongTermMemory
 
-# Import JSM State Manager
+# Import JSM State Management Tools
 try:
-    from .jsm_state_manager import JSMStateManager, WorkflowState, create_jsm_state_manager
-    from .tools.jsm_comprehensive_tool import JSMComprehensiveTool, JSMIncidentManagementTool
+    from .tools.jsm_state_management_tools import (
+        get_jsm_state_management_tools,
+        get_jsm_fetcher_tools,
+        get_jsm_state_tools
+    )
     from .tools.jsm_specialized_tools import (
-        JSMIncidentCreatorTool,
         JSMIncidentUpdaterTool,
-        JSMIncidentResolverTool,
         JSMServiceDeskMonitorTool,
         JSMKnowledgeSearchTool,
         JSMSLAMonitorTool
@@ -34,12 +35,13 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from autonomous_sre_bot.jsm_state_manager import JSMStateManager, WorkflowState, create_jsm_state_manager
-    from autonomous_sre_bot.tools.jsm_comprehensive_tool import JSMComprehensiveTool, JSMIncidentManagementTool
+    from autonomous_sre_bot.tools.jsm_state_management_tools import (
+        get_jsm_state_management_tools,
+        get_jsm_fetcher_tools,
+        get_jsm_state_tools
+    )
     from autonomous_sre_bot.tools.jsm_specialized_tools import (
-        JSMIncidentCreatorTool,
         JSMIncidentUpdaterTool,
-        JSMIncidentResolverTool,
         JSMServiceDeskMonitorTool,
         JSMKnowledgeSearchTool,
         JSMSLAMonitorTool
@@ -56,14 +58,12 @@ logger = logging.getLogger(__name__)
 
 class SelfHealingCrew:
     """
-    Autonomous SRE Self-Healing Crew
+    Refactored Autonomous SRE Self-Healing Crew
     
-    Implements the complete workflow:
-    1. Monitor JIRA for incidents
-    2. Analyze Kubernetes root cause
-    3. Generate automated fixes
-    4. Create pull requests
-    5. Monitor deployment and verify resolution
+    Architecture:
+    1. Agent-driven workflow: Agents use JSM State Manager tools to fetch and manage incidents
+    2. JSM as source of truth: All state management goes through JSM tools
+    3. Independent execution: Crew runs without external state management orchestration
     """
     
     def __init__(self, config_path: str = "src/autonomous_sre_bot/config", log_level: str = "INFO"):
@@ -74,24 +74,26 @@ class SelfHealingCrew:
         self.agents_config = self._load_config("self_heal_agents.yaml")
         self.tasks_config = self._load_config("self_heal_tasks.yaml")
         
-        # Initialize LLM - using the same model as incident_crew.py with explicit base_url
+        # Initialize LLM
         self.llm = LLM(
             model="deepseek-chat",
             base_url="https://api.deepseek.com/v1",
             api_key=os.getenv('OPENAI_API_KEY')
         )
         
-        # Initialize JSM State Manager
-        self.state_manager = create_jsm_state_manager(config_path)
-        
         # Validate GitHub integration
         self._validate_github_integration()
         
         # Initialize crew components
         self.agents = {}
+        self.tasks = {}
         
-        # Build the agents (tasks will be built per incident)
+        # Build the agents and tasks
         self._build_agents()
+        self._build_tasks()
+        
+        # Build the crew
+        self.crew = self._build_crew()
     
     def _load_config(self, filename: str) -> Dict[str, Any]:
         """Load YAML configuration file"""
@@ -127,45 +129,59 @@ class SelfHealingCrew:
         logger.info("GitHub integration validation complete")
     
     def _build_agents(self):
-        """Build all five agents with their respective JSM and other tools"""
+        """Build all agents with JSM State Management tools"""
         
-        # Initialize JSM tools that will be shared across agents
-        jsm_comprehensive = JSMComprehensiveTool()
-        jsm_incident_creator = JSMIncidentCreatorTool()
-        jsm_incident_updater = JSMIncidentUpdaterTool()
-        jsm_incident_resolver = JSMIncidentResolverTool()
-        jsm_service_monitor = JSMServiceDeskMonitorTool()
+        # Get JSM state management tools
+        jsm_state_tools = get_jsm_state_management_tools(self.config_path)
+        jsm_fetcher_tools = get_jsm_fetcher_tools(self.config_path)
+        jsm_state_only_tools = get_jsm_state_tools(self.config_path)
+        
+        # Additional JSM tools
         jsm_knowledge_search = JSMKnowledgeSearchTool()
         jsm_sla_monitor = JSMSLAMonitorTool()
-        # jsm_incident_management = JSMIncidentManagementTool()  # Temporarily disabled
+        jsm_service_monitor = JSMServiceDeskMonitorTool()
+        jsm_incident_updater = JSMIncidentUpdaterTool()
         
-        # Agent 1: JIRA Monitor Agent
-        jira_config = self.agents_config['jira_monitor']
-        self.agents['jira_monitor'] = Agent(
-            role=jira_config['role'],
-            goal=jira_config['goal'],
-            backstory=jira_config['backstory'],
-            tools=[
-                jsm_service_monitor,
-                jsm_comprehensive,
-                jsm_incident_creator,
-                jsm_sla_monitor,
-                jsm_knowledge_search
-            ],
-            max_iter=jira_config.get('max_iter', 3),
-            memory=jira_config.get('memory', True),
-            verbose=jira_config.get('verbose', True),
-            allow_delegation=jira_config.get('allow_delegation', False),
+        # Agent 1: Incident Fetcher and Coordinator Agent
+        incident_coordinator_config = self.agents_config['jira_monitor']
+        
+        # Tools for incident coordination: fetch incidents, check states, transition states
+        coordinator_tools = jsm_fetcher_tools + jsm_state_only_tools + [
+            jsm_service_monitor,
+            jsm_sla_monitor,
+            jsm_knowledge_search
+        ]
+        
+        self.agents['incident_coordinator'] = Agent(
+            role="Incident Coordinator and Fetcher",
+            goal="""
+            Fetch incidents assigned to the autonomous SRE system and coordinate their resolution.
+            Use JSM tools to find incidents that need automated resolution and manage their workflow states.
+            """,
+            backstory="""
+            You are the incident coordinator for the autonomous SRE system. Your job is to:
+            1. Fetch incidents from JIRA based on assignee and priority criteria
+            2. Check the current state of incidents using JSM state management tools
+            3. Coordinate with other agents to resolve incidents
+            4. Transition incident states as work progresses
+            5. Ensure incidents are properly tracked throughout the resolution process
+            
+            You understand the workflow states and can manage incident lifecycles effectively.
+            """,
+            tools=coordinator_tools,
+            max_iter=incident_coordinator_config.get('max_iter', 3),
+            memory=incident_coordinator_config.get('memory', True),
+            verbose=incident_coordinator_config.get('verbose', True),
+            allow_delegation=True,  # Can delegate to analysis and fix agents
             llm=self.llm
         )
         
         # Agent 2: Root Cause Analyzer Agent
         rca_config = self.agents_config['root_cause_analyzer']
         
-        rca_tools = [
-            jsm_comprehensive,
-            jsm_incident_updater,
+        rca_tools = jsm_state_only_tools + [
             jsm_knowledge_search,
+            jsm_incident_updater
         ]
         
         # Get Kubernetes MCP tools for root cause analysis
@@ -198,27 +214,30 @@ class SelfHealingCrew:
             llm=self.llm
         )
         
-        # Agent 3: Code Fix Generator Agent
+        # Agent 3: Code Fix Generator and PR Manager Agent
         fix_config = self.agents_config['code_fix_generator']
         
-        fix_tools = [
-            jsm_comprehensive,
-            jsm_incident_updater,
+        fix_tools = jsm_state_only_tools + [
             jsm_knowledge_search,
+            jsm_incident_updater
         ]
         
-        # Get GitHub MCP tools for code analysis and PR creation
+        # Get GitHub MCP tools for code fixes and PR management
         try:
-            # Use specific toolsets for code analysis and repository operations
-            github_tools = get_github_mcp_tools(
-                toolsets=['repos', 'pull_requests', 'issues'],
-                read_only=False
-            )
-            if github_tools:
-                fix_tools.append(github_tools)
-                logger.info("Successfully got GitHub MCP tools for code fix generation with repos, pull_requests, and issues toolsets")
+            github_fix_tools = get_github_mcp_tools([
+                'github_create_or_update_file',
+                'github_create_pull_request',
+                'github_get_file',
+                'github_list_files',
+                'github_get_pull_request',
+                'github_merge_pull_request',
+                'github_list_pull_requests'
+            ])
+            if github_fix_tools:
+                fix_tools.extend(github_fix_tools)
+                logger.info(f"Successfully got {len(github_fix_tools)} GitHub MCP tools for code fixes and PR management")
             else:
-                logger.info("GitHub MCP tools not available for code fix generation - will use JSM tools only")
+                logger.info("GitHub MCP tools not available for code fixes and PR management")
         except Exception as e:
             logger.warning(f"GitHub MCP tools not available: {e}")
             logger.info("Code fix generator will use JSM tools only")
@@ -228,75 +247,29 @@ class SelfHealingCrew:
             goal=fix_config['goal'],
             backstory=fix_config['backstory'],
             tools=fix_tools,
-            max_iter=fix_config.get('max_iter', 4),
+            max_iter=fix_config.get('max_iter', 5),
             memory=fix_config.get('memory', True),
             verbose=fix_config.get('verbose', True),
             allow_delegation=fix_config.get('allow_delegation', True),
             llm=self.llm
         )
         
-        # Agent 4: PR Manager Agent
-        pr_config = self.agents_config['pr_manager']
-        
-        # Agent 4: PR Manager Agent
-        pr_config = self.agents_config['pr_manager']
-        
-        pr_tools = [
-            jsm_comprehensive,
-            jsm_incident_updater,
-        ]
-        
-        # Get GitHub MCP tools for PR management
-        try:
-            # Use specific toolsets for pull request operations
-            github_pr_tools = get_github_mcp_tools(
-                toolsets=['pull_requests', 'repos'],
-                read_only=False
-            )
-            if github_pr_tools:
-                pr_tools.append(github_pr_tools)
-                logger.info("Successfully got GitHub MCP tools for PR management with pull_requests and repos toolsets")
-            else:
-                logger.info("GitHub MCP tools not available for PR management")
-        except Exception as e:
-            logger.warning(f"GitHub PR MCP tools not available: {e}")
-            logger.info("PR manager will use JSM tools only")
-            
-        self.agents['pr_manager'] = Agent(
-            role=pr_config['role'],
-            goal=pr_config['goal'],
-            backstory=pr_config['backstory'],
-            tools=pr_tools,
-            max_iter=pr_config.get('max_iter', 3),
-            memory=pr_config.get('memory', True),
-            verbose=pr_config.get('verbose', True),
-            allow_delegation=pr_config.get('allow_delegation', False),
-            llm=self.llm
-        )
-        
-        # Agent 5: Deployment Monitor Agent
+        # Agent 4: Deployment Monitor Agent
         deploy_config = self.agents_config['deployment_monitor']
         
-        # Agent 5: Deployment Monitor Agent
-        deploy_config = self.agents_config['deployment_monitor']
-        
-        deploy_tools = [
-            jsm_comprehensive,
-            jsm_incident_updater,
-            jsm_incident_resolver,
-        ]
+        deploy_tools = jsm_state_only_tools + [jsm_incident_updater]
         
         # Get Kubernetes MCP tools for deployment monitoring
         try:
-            k8s_monitoring_tools = get_kubernetes_crewai_tools([
+            k8s_deploy_tools = get_kubernetes_crewai_tools([
                 'pods_list',
-                'pods_get',
-                'events_list',
-                'configuration_view'
+                'deployments_get',
+                'services_list',
+                'events_list'
             ])
-            if k8s_monitoring_tools:
-                deploy_tools.extend(k8s_monitoring_tools)
-                logger.info(f"Successfully got {len(k8s_monitoring_tools)} Kubernetes CrewAI tools for deployment monitoring")
+            if k8s_deploy_tools:
+                deploy_tools.extend(k8s_deploy_tools)
+                logger.info(f"Successfully got {len(k8s_deploy_tools)} Kubernetes CrewAI tools for deployment monitoring")
             else:
                 logger.info("Kubernetes CrewAI tools not available for deployment monitoring")
         except Exception as e:
@@ -315,209 +288,164 @@ class SelfHealingCrew:
             llm=self.llm
         )
         
-        logger.info("Successfully built all 5 agents with JSM and MCP tools")
+        logger.info("Successfully built all 4 agents with JSM State Management tools")
         
         # Log tool counts for debugging
         for agent_name, agent in self.agents.items():
             logger.info(f"{agent_name}: {len(agent.tools)} tools configured")
-            for i, tool in enumerate(agent.tools):
-                tool_name = getattr(tool, 'name', tool.__class__.__name__)
-                logger.debug(f"  - Tool {i+1}: {tool_name}")
     
-    def _get_jsm_tools_for_agent(self, agent_type: str) -> List[Any]:
-        """
-        Get appropriate JSM tools for specific agent types
+    def _build_tasks(self):
+        """Build tasks for the refactored workflow"""
         
-        Args:
-            agent_type: Type of agent ('jira_monitor', 'root_cause_analyzer', etc.)
+        # Task 1: Fetch and Coordinate Incidents
+        self.tasks['fetch_and_coordinate'] = Task(
+            description="""
+            Use JSM State Management tools to fetch incidents that need automated resolution.
             
-        Returns:
-            List of JSM tools appropriate for the agent
-        """
+            Your workflow:
+            1. Use jsm_incident_fetcher to get incidents assigned to the autonomous SRE system
+               - Look for incidents with high or critical priority
+               - Check for incidents assigned to 'autonomous-sre' or similar
+            2. For each incident found:
+               - Use jsm_state_checker to get the current workflow state
+               - Determine what action is needed based on the state
+               - Use jsm_state_transition to move incidents to appropriate states
+            3. Coordinate with other agents to resolve incidents:
+               - Delegate analysis tasks to the root cause analyzer
+               - Delegate fix generation to the code fix generator
+               - Delegate PR management to the PR manager
+               - Delegate deployment monitoring to the deployment monitor
+            4. Use jsm_metadata_updater to track progress and store coordination information
+            
+            Focus on incidents that can be automatically resolved and ensure proper state management.
+            """,
+            expected_output="""
+            A detailed report containing:
+            1. List of incidents fetched and their current states
+            2. Actions taken for each incident (state transitions, delegations)
+            3. Coordination plan for resolving each incident
+            4. Any incidents that require human intervention
+            5. Updated incident metadata with coordination information
+            """,
+            agent=self.agents['incident_coordinator']
+        )
         
-        # Base JSM tools available to all agents
-        base_tools = [JSMComprehensiveTool()]
+        # Task 2: Root Cause Analysis
+        self.tasks['root_cause_analysis'] = Task(
+            description="""
+            Perform detailed root cause analysis for incidents assigned by the coordinator.
+            
+            Your workflow:
+            1. Use jsm_state_checker to verify incident details and current state
+            2. Use Kubernetes tools to investigate:
+               - Pod status and logs using pods_list, pods_get, and pods_logs
+               - Recent events using events_list
+               - Configuration issues using configuration_view
+            3. Use jsm_search_knowledge to find similar incidents and solutions
+            4. Analyze the data to identify the root cause
+            5. Use jsm_state_transition to move incident to "RCA Completed"
+            6. Use jsm_metadata_updater to store detailed analysis results
+            
+            Provide thorough, evidence-based root cause analysis.
+            """,
+            expected_output="""
+            Comprehensive root cause analysis including:
+            1. Description of the incident and its symptoms
+            2. Detailed investigation steps taken
+            3. Evidence gathered from logs, events, and configuration
+            4. Root cause identification with supporting data
+            5. Recommended fix approach
+            6. Impact assessment and urgency level
+            """,
+            agent=self.agents['root_cause_analyzer']
+        )
         
-        if agent_type == 'jira_monitor':
-            return base_tools + [
-                JSMServiceDeskMonitorTool(),
-                JSMIncidentCreatorTool(),
-                JSMSLAMonitorTool(),
-                JSMKnowledgeSearchTool()
-            ]
+        # Task 3: Generate Code Fixes and Manage Pull Requests
+        self.tasks['generate_fixes_and_prs'] = Task(
+            description="""
+            Generate automated fixes based on root cause analysis results and manage the complete PR lifecycle.
             
-        elif agent_type == 'root_cause_analyzer':
-            return base_tools + [
-                JSMIncidentUpdaterTool(),
-                JSMKnowledgeSearchTool()
-            ]
+            Your workflow:
+            1. Use jsm_state_checker to get incident details and analysis results
+            2. Use jsm_search_knowledge to find proven fix patterns
+            3. Generate appropriate fixes using GitHub tools:
+               - Use github_get_file to examine current configurations
+               - Use github_create_or_update_file to create fix files
+               - Ensure fixes are tested and follow best practices
+            4. Create and manage pull requests:
+               - Use github_create_pull_request to create PRs for fixes
+               - Use github_get_pull_request to monitor PR status
+               - Use github_merge_pull_request when appropriate
+            5. Use jsm_state_transition to move incident to "Code Fix Completed" when PR is merged and ready for deployment
+            6. Use jsm_metadata_updater to store fix details, file locations, and PR information
             
-        elif agent_type == 'code_fix_generator':
-            return base_tools + [
-                JSMIncidentUpdaterTool(),
-                JSMKnowledgeSearchTool()
-            ]
-            
-        elif agent_type == 'pr_manager':
-            return base_tools + [
-                JSMIncidentUpdaterTool()
-            ]
-            
-        elif agent_type == 'deployment_monitor':
-            return base_tools + [
-                JSMIncidentUpdaterTool(),
-                JSMIncidentResolverTool(),
-                JSMIncidentManagementTool()
-            ]
+            Generate precise, tested fixes and manage the complete PR lifecycle.
+            """,
+            expected_output="""
+            Complete fix and PR management report including:
+            1. Description of the fix approach and rationale
+            2. List of files created or modified
+            3. Code changes with explanations
+            4. PR creation details with links
+            5. PR review and merge status
+            6. Deployment readiness confirmation
+            7. Rollback plan if needed
+            """,
+            agent=self.agents['code_fix_generator']
+        )
         
-        return base_tools
+        # Task 4: Monitor Deployment and Verify Resolution
+        self.tasks['monitor_deployment'] = Task(
+            description="""
+            Monitor deployment of fixes and verify incident resolution.
+            
+            Your workflow:
+            1. Use jsm_state_checker to get deployment details from incident metadata
+            2. Use Kubernetes tools to monitor deployment:
+               - Use deployments_get to check deployment status
+               - Use pods_list to verify new pods are running
+               - Use events_list to check for deployment issues
+            3. Verify the fix resolves the original issue
+            4. Use jsm_state_transition to update states through the simplified workflow:
+               - "Deployment Done" when deployment succeeds
+               - "Deployment Validated" when deployment is verified
+               - "Resolved" when issue is fully resolved
+            5. Use jsm_metadata_updater to store verification results
+            
+            Ensure fixes are properly deployed and incidents are resolved following the simplified state lifecycle.
+            """,
+            expected_output="""
+            Deployment and verification report including:
+            1. Deployment status and timeline
+            2. Verification test results
+            3. Confirmation that original issue is resolved
+            4. Performance impact assessment
+            5. Final incident resolution status
+            6. Lessons learned and recommendations
+            """,
+            agent=self.agents['deployment_monitor']
+        )
+        
+        logger.info("Successfully built all tasks for simplified refactored workflow")
     
-    def _build_tasks_for_incident(self, incident_key, incident_data):
-        """Build tasks customized for a specific incident"""
-        tasks = {}
+    def _build_crew(self):
+        """Build the crew with sequential process"""
         
-        # Extract incident details
-        summary = incident_data.get('summary', f'Unknown incident {incident_key}')
-        priority = incident_data.get('priority', 'High')
-        
-        # Task 1: Monitor JIRA Incidents (focused on specific incident)
-        monitor_config = self.tasks_config['monitor_jira_incidents']
-        tasks['monitor_jira_incidents'] = Task(
-            description=f"""
-            Focus on analyzing the specific incident: {incident_key} - {summary}
-            
-            This incident has priority: {priority}
-            
-            Use JSM tools to:
-            1. Get detailed information about incident {incident_key} using jsm_get_incident
-            2. Check SLA status for this specific incident using jsm_monitor_sla
-            3. Search knowledge base for similar incidents and solutions using jsm_search_knowledge
-            4. Get incident history and comments to understand current status
-            5. Identify any related incidents or patterns
-            
-            Focus specifically on this incident: {incident_key}
-            Provide detailed context about what's happening and what needs to be resolved.
-            """,
-            expected_output=f"Detailed analysis of incident {incident_key} including current status, SLA information, and related context",
-            agent=self.agents['jira_monitor']
-        )
-        
-        # Task 2: Analyze Root Cause (for specific incident)
-        analyze_config = self.tasks_config['analyze_kubernetes_root_cause']
-        tasks['analyze_kubernetes_root_cause'] = Task(
-            description=f"""
-            Analyze the root cause for incident {incident_key}: {summary}
-            
-            {analyze_config['description']}
-            
-            Focus specifically on:
-            - Issues related to incident {incident_key}
-            - Infrastructure problems that might be causing this specific incident
-            - Kubernetes resources that could be impacting this service
-            - Log patterns related to this incident timeframe
-            """,
-            expected_output=f"Root cause analysis for incident {incident_key} with specific technical findings",
-            agent=self.agents['root_cause_analyzer'],
-            context=[tasks['monitor_jira_incidents']]
-        )
-        
-        # Task 3: Generate Code Fix (for specific incident)
-        fix_config = self.tasks_config['generate_code_fix']
-        tasks['generate_code_fix'] = Task(
-            description=f"""
-            Generate a code fix for incident {incident_key}: {summary}
-            
-            {fix_config['description']}
-            
-            Create fixes specifically targeting:
-            - The root cause identified for incident {incident_key}
-            - Configuration changes needed to resolve this specific issue
-            - Code changes that will prevent this incident from recurring
-            """,
-            expected_output=f"Code fix solution for incident {incident_key} with specific implementation details",
-            agent=self.agents['code_fix_generator'],
-            context=[
-                tasks['monitor_jira_incidents'],
-                tasks['analyze_kubernetes_root_cause']
-            ]
-        )
-        
-        # Task 4: Create Pull Request (for specific incident)
-        pr_config = self.tasks_config['create_fix_pull_request']
-        tasks['create_fix_pull_request'] = Task(
-            description=f"""
-            Create a pull request to fix incident {incident_key}: {summary}
-            
-            {pr_config['description']}
-            
-            The PR should:
-            - Reference incident {incident_key} in the title and description
-            - Include the specific fixes developed for this incident
-            - Link back to the JSM ticket {incident_key}
-            - Explain how this resolves the reported issue
-            """,
-            expected_output=f"Pull request created for incident {incident_key} with proper linking and documentation",
-            agent=self.agents['pr_manager'],
-            context=[
-                tasks['monitor_jira_incidents'],
-                tasks['analyze_kubernetes_root_cause'],
-                tasks['generate_code_fix']
-            ]
-        )
-        
-        # Task 5: Monitor Deployment (for specific incident)
-        deploy_config = self.tasks_config['monitor_deployment_verification']
-        tasks['monitor_deployment_verification'] = Task(
-            description=f"""
-            Monitor deployment and verify resolution of incident {incident_key}: {summary}
-            
-            {deploy_config['description']}
-            
-            Specifically verify:
-            - The fix for incident {incident_key} has been deployed successfully
-            - The original problem reported in {incident_key} is resolved
-            - No new issues were introduced by the fix
-            - Update incident {incident_key} status based on deployment results
-            """,
-            expected_output=f"Deployment verification and incident {incident_key} resolution confirmation",
-            agent=self.agents['deployment_monitor'],
-            context=[
-                tasks['monitor_jira_incidents'],
-                tasks['analyze_kubernetes_root_cause'],
-                tasks['generate_code_fix'],
-                tasks['create_fix_pull_request']
-            ]
-        )
-        
-        logger.info(f"Successfully built 5 tasks for incident {incident_key}")
-        return tasks
-    
-    def _build_crew_for_incident(self, incident_tasks):
-        """Build the complete crew with all agents and incident-specific tasks"""
-        crew_config = self.tasks_config.get('crew_config', {})
-        
-        # Handle verbose setting - convert number to boolean if needed
-        verbose_setting = crew_config.get('verbose', True)
-        if isinstance(verbose_setting, int):
-            verbose_setting = verbose_setting > 0
-        
+        # Use sequential process since we want coordinated workflow
         return Crew(
             agents=list(self.agents.values()),
-            tasks=list(incident_tasks.values()),
+            tasks=list(self.tasks.values()),
             process=Process.sequential,
-            memory=crew_config.get('memory', True),
-            verbose=verbose_setting,
-            max_rpm=crew_config.get('max_rpm', 10),
+            memory=True,
+            verbose=True,
+            max_rpm=10,
             planning=True,
             planning_llm=self.llm
         )
-        
-        logger.info("Successfully built the self-healing crew")
     
-    def execute_simple_workflow_test(self, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def execute_self_healing_workflow(self, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Execute a simplified workflow test without MCP servers
-        This is useful for testing the crew structure and workflow logic
+        Execute the refactored self-healing workflow
         
         Args:
             inputs: Optional inputs for the workflow
@@ -528,846 +456,39 @@ class SelfHealingCrew:
         if inputs is None:
             inputs = {
                 "timestamp": datetime.now().isoformat(),
-                "workflow_type": "autonomous_self_healing_test",
-                "priority_threshold": "High",
-                "namespace": "production"
+                "workflow_type": "refactored_autonomous_self_healing",
+                "assignee_filter": "autonomous-sre",
+                "priority_filter": "High,Critical",
+                "max_incidents": 5
             }
         
-        logger.info(f"Starting simple workflow test with inputs: {inputs}")
+        logger.info(f"Starting refactored self-healing workflow with inputs: {inputs}")
         
         try:
-            # Execute the crew with default tasks
+            # Execute the crew workflow
             result = self.crew.kickoff(inputs=inputs)
             
             return {
                 "success": True,
                 "timestamp": datetime.now().isoformat(),
                 "workflow_result": str(result),
-                "inputs": inputs
+                "inputs": inputs,
+                "message": "Refactored workflow completed successfully"
             }
             
         except Exception as e:
-            logger.error(f"Error executing simple workflow test: {str(e)}")
+            logger.error(f"Error executing refactored workflow: {str(e)}")
             
             return {
                 "success": False,
                 "timestamp": datetime.now().isoformat(),
                 "error": str(e),
-                "inputs": inputs
+                "inputs": inputs,
+                "message": "Refactored workflow failed"
             }
 
-    def execute_self_healing_workflow(self, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Execute the complete self-healing workflow using JSM state management
-        
-        Args:
-            inputs: Optional inputs for the workflow (e.g., specific incident filters)
-            
-        Returns:
-            Dict containing the results of the workflow execution
-        """
-        if inputs is None:
-            inputs = {
-                "timestamp": datetime.now().isoformat(),
-                "workflow_type": "autonomous_self_healing",
-                "priority_threshold": "High",
-                "namespace": "production"
-            }
-        
-        logger.info(f"Starting state-driven self-healing workflow with inputs: {inputs}")
-        
-        try:
-            # Get incidents that need automated action
-            actionable_incidents = self.state_manager.get_next_actionable_incidents()
-            
-            if not actionable_incidents:
-                logger.info("No actionable incidents found")
-                return {
-                    "success": True,
-                    "timestamp": datetime.now().isoformat(),
-                    "message": "No actionable incidents found",
-                    "incidents_processed": 0,
-                    "inputs": inputs
-                }
-            
-            processed_incidents = []
-            
-            # Process each actionable incident
-            for incident in actionable_incidents:
-                incident_key = incident['key']
-                current_state = WorkflowState[incident['workflow_state']]
-                
-                logger.info(f"Processing incident {incident_key} in state {current_state.name}")
-                
-                # Execute appropriate workflow step based on current state
-                step_result = self._execute_workflow_step(incident, current_state, inputs)
-                processed_incidents.append({
-                    "incident_key": incident_key,
-                    "current_state": current_state.name,
-                    "step_result": step_result
-                })
-            
-            logger.info(f"Processed {len(processed_incidents)} incidents")
-            
-            return {
-                "success": True,
-                "timestamp": datetime.now().isoformat(),
-                "incidents_processed": len(processed_incidents),
-                "processed_incidents": processed_incidents,
-                "inputs": inputs
-            }
-            
-        except Exception as e:
-            logger.error(f"Error executing state-driven workflow: {str(e)}")
-            
-            return {
-                "success": False,
-                "timestamp": datetime.now().isoformat(),
-                "error": str(e),
-                "inputs": inputs
-            }
-    
-    def _execute_workflow_step(self, incident: Dict[str, Any], current_state: WorkflowState, 
-                              inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Execute the complete crew workflow for a specific incident
-        
-        Args:
-            incident: Incident data from JSM
-            current_state: Current workflow state
-            inputs: Workflow inputs
-            
-        Returns:
-            Result of the crew workflow execution
-        """
-        incident_key = incident['key']
-        
-        try:
-            # Transition incident to analysis in progress
-            self.state_manager.transition_incident_state(
-                incident_key, 
-                WorkflowState.ANALYSIS_IN_PROGRESS,
-                {"step": "full_workflow", "started_at": datetime.now().isoformat()}
-            )
-            
-            # Prepare incident-specific inputs for the crew
-            incident_inputs = {
-                **inputs,
-                "incident_key": incident_key,
-                "incident_summary": incident.get('summary', 'No summary'),
-                "incident_priority": incident.get('priority', 'Unknown'),
-                "incident_status": incident.get('status', 'Unknown'),
-                "current_workflow_state": current_state.name,
-                "target_namespace": inputs.get('namespace', 'production')
-            }
-            
-            logger.info(f"Executing full crew workflow for incident {incident_key}")
-            
-            # Execute the complete crew workflow for this incident
-            crew_result = self.crew.kickoff(inputs=incident_inputs)
-            
-            # Update incident metadata with crew results
-            self.state_manager.update_incident_metadata(incident_key, {
-                "crew_execution_result": str(crew_result),
-                "crew_executed_at": datetime.now().isoformat(),
-                "workflow_state_before": current_state.name
-            })
-            
-            # After crew execution, determine next state based on results
-            self._update_incident_state_after_crew_execution(incident_key, crew_result)
-            
-            return {
-                "success": True,
-                "method": "full_crew_execution",
-                "result": str(crew_result),
-                "incident_key": incident_key
-            }
-                
-        except Exception as e:
-            logger.error(f"Error executing crew workflow for {incident_key}: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "incident_key": incident_key
-            }
-    
-    def _update_incident_state_after_crew_execution(self, incident_key: str, crew_result: Any) -> None:
-        """
-        Update incident state based on crew execution results
-        
-        Args:
-            incident_key: The incident key
-            crew_result: Result from crew.kickoff()
-        """
-        try:
-            # Convert crew result to string for analysis
-            result_str = str(crew_result).lower()
-            
-            # Determine the appropriate next state based on crew execution results
-            if any(keyword in result_str for keyword in ['pull request created', 'pr created', 'opened pull request']):
-                # If a PR was created, transition to PR_CREATED
-                self.state_manager.transition_incident_state(
-                    incident_key,
-                    WorkflowState.PR_CREATED,
-                    {"crew_result": "PR created", "awaiting_review": True}
-                )
-                logger.info(f"Transitioned {incident_key} to PR_CREATED based on crew results")
-                
-            elif any(keyword in result_str for keyword in ['analysis complete', 'root cause identified', 'fix recommended']):
-                # If analysis was completed, transition to ANALYSIS_COMPLETE
-                self.state_manager.transition_incident_state(
-                    incident_key,
-                    WorkflowState.ANALYSIS_COMPLETE,
-                    {"crew_result": "Analysis completed"}
-                )
-                logger.info(f"Transitioned {incident_key} to ANALYSIS_COMPLETE based on crew results")
-                
-            elif any(keyword in result_str for keyword in ['fix generated', 'code fix', 'solution implemented']):
-                # If a fix was generated, transition to FIX_GENERATED
-                self.state_manager.transition_incident_state(
-                    incident_key,
-                    WorkflowState.FIX_GENERATED,
-                    {"crew_result": "Fix generated"}
-                )
-                logger.info(f"Transitioned {incident_key} to FIX_GENERATED based on crew results")
-                
-            elif any(keyword in result_str for keyword in ['resolved', 'fixed', 'deployment successful']):
-                # If incident was fully resolved, transition to INCIDENT_RESOLVED
-                self.state_manager.transition_incident_state(
-                    incident_key,
-                    WorkflowState.INCIDENT_RESOLVED,
-                    {"crew_result": "Incident resolved", "resolved_at": datetime.now().isoformat()}
-                )
-                logger.info(f"Transitioned {incident_key} to INCIDENT_RESOLVED based on crew results")
-                
-            else:
-                # Default: assume analysis is in progress or requires human intervention
-                logger.info(f"Crew execution completed for {incident_key}, no specific state transition identified")
-                
-        except Exception as e:
-            logger.error(f"Error updating incident state after crew execution for {incident_key}: {e}")
-    
-    def _execute_analysis_step(self, incident: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute root cause analysis step"""
-        incident_key = incident['key']
-        
-        # Transition to analysis in progress
-        self.state_manager.transition_incident_state(
-            incident_key, 
-            WorkflowState.ANALYSIS_IN_PROGRESS,
-            {"step": "root_cause_analysis", "started_at": datetime.now().isoformat()}
-        )
-        
-        # Create focused task for this incident with JSM context
-        analysis_task = Task(
-            description=f"""
-            Perform root cause analysis for the OPEN incident {incident_key}.
-            
-            First, gather current context from JSM:
-            1. Use JSM tools to get the LATEST incident details, comments, and current status
-            2. Search the knowledge base for similar recent incidents and solutions
-            3. Check current SLA status to understand urgency and time constraints
-            4. Review any recent updates or changes to the incident
-            
-            Then analyze the current technical state using Kubernetes CrewAI tools:
-            - Use pods_list to check current pod health in namespace: {inputs.get('namespace', 'production')}
-            - Use events_list to get recent cluster events and correlate with incident timeline
-            - Use pods_logs to examine logs from problematic pods identified in the incident
-            - Use pods_get for detailed pod specifications and resource constraints
-            - Use configuration_view to understand current cluster configuration
-            - Focus on why this incident is still OPEN and what needs to be resolved now
-            
-            Provide concrete evidence and recommend specific fix approaches for immediate resolution.
-            """,
-            expected_output="Comprehensive root cause analysis with current evidence, timeline, and recommended fix approach including JSM incident updates",
-            agent=self.agents['root_cause_analyzer']
-        )
-        
-        # Execute analysis using a temporary crew
-        temp_crew = Crew(
-            agents=[self.agents['root_cause_analyzer']],
-            tasks=[analysis_task],
-            verbose=True
-        )
-        
-        analysis_result = temp_crew.kickoff()
-        
-        # Update incident in JSM with analysis results
-        try:
-            jsm_updater = JSMIncidentUpdaterTool()
-            jsm_update_result = jsm_updater._run(
-                incident_key=incident_key,
-                update_type="analysis",
-                content=f"## Root Cause Analysis Completed\n\n{analysis_result}",
-                internal_only=False
-            )
-            logger.info(f"Updated JSM incident {incident_key} with analysis: {jsm_update_result}")
-        except Exception as e:
-            logger.error(f"Failed to update JSM incident {incident_key}: {e}")
-        
-        # Update incident metadata in state manager
-        self.state_manager.update_incident_metadata(incident_key, {
-            "analysis_result": analysis_result,
-            "analysis_completed_at": datetime.now().isoformat()
-        })
-        
-        # Transition to analysis complete
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.ANALYSIS_COMPLETE,
-            {"analysis_summary": analysis_result[:500]}  # Truncated summary
-        )
-        
-        return {
-            "success": True,
-            "step": "analysis",
-            "result": analysis_result,
-            "incident_key": incident_key
-        }
-    
-    def _execute_fix_generation_step(self, incident: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute code fix generation step"""
-        incident_key = incident['key']
-        
-        # Get analysis results from incident metadata
-        analysis_data = incident.get('workflow_metadata', {}).get('analysis_result', '')
-        
-        # Transition to fix generation in progress
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.FIX_GENERATION_IN_PROGRESS,
-            {"step": "fix_generation", "started_at": datetime.now().isoformat()}
-        )
-        
-        # Create fix generation task
-        fix_task = Task(
-            description=f"""
-            Based on the root cause analysis for incident {incident_key}, generate automated fixes using available tools.
-            Analysis results: {analysis_data}
-            
-            Use GitHub MCP tools to:
-            - Search for relevant configuration files and code repositories
-            - Read current implementations and identify problematic code
-            - Identify specific files that need modification for the fix
-            
-            Create specific code changes, Kubernetes manifest updates, or configuration fixes.
-            Focus on minimal, targeted changes that address the root cause.
-            Provide implementation steps and file paths for the changes needed.
-            """,
-            expected_output="Specific code fixes with implementation instructions",
-            agent=self.agents['code_fix_generator']
-        )
-        
-        # Execute fix generation
-        temp_crew = Crew(
-            agents=[self.agents['code_fix_generator']],
-            tasks=[fix_task],
-            verbose=True
-        )
-        fix_result = temp_crew.kickoff()
-        
-        # Update incident with fix details
-        self.state_manager.update_incident_metadata(incident_key, {
-            "fix_result": fix_result,
-            "fix_generated_at": datetime.now().isoformat()
-        })
-        
-        # Transition to fix generated
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.FIX_GENERATED,
-            {"fix_summary": fix_result[:500]}
-        )
-        
-        return {
-            "success": True,
-            "step": "fix_generation", 
-            "result": fix_result,
-            "incident_key": incident_key
-        }
-    
-    def _execute_pr_creation_step(self, incident: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute PR creation step"""
-        incident_key = incident['key']
-        
-        # Get fix results from incident metadata
-        fix_data = incident.get('workflow_metadata', {}).get('fix_result', '')
-        
-        # Transition to PR creation in progress
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.PR_CREATION_IN_PROGRESS,
-            {"step": "pr_creation", "started_at": datetime.now().isoformat()}
-        )
-        
-        # Create PR task
-        pr_task = Task(
-            description=f"""
-            Create a pull request for the automated fix for incident {incident_key}.
-            Fix details: {fix_data}
-            
-            Use GitHub MCP tools to:
-            - Create a new branch for the automated fix
-            - Create the pull request with proper documentation
-            - Include link to the original incident {incident_key}
-            - Set up appropriate reviewers and labels
-            - Ensure the PR description clearly explains the fix and references the incident
-            """,
-            expected_output="Pull request created with URL and tracking information",
-            agent=self.agents['pr_manager']
-        )
-        
-        # Execute PR creation
-        pr_result = pr_task.execute()
-        
-        # Update incident with PR details
-        self.state_manager.update_incident_metadata(incident_key, {
-            "pr_result": pr_result,
-            "pr_created_at": datetime.now().isoformat()
-        })
-        
-        # Transition to PR created (now waiting for human review)
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.PR_CREATED,
-            {"pr_summary": pr_result[:500], "awaiting_review": True}
-        )
-        
-        return {
-            "success": True,
-            "step": "pr_creation",
-            "result": pr_result,
-            "incident_key": incident_key
-        }
-    
-    def _check_pr_status_step(self, incident: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Check PR status and handle state transitions"""
-        incident_key = incident['key']
-        
-        # Get PR details from incident metadata
-        pr_data = incident.get('workflow_metadata', {}).get('pr_result', '')
-        
-        # Create PR status check task
-        status_task = Task(
-            description=f"""
-            Check the status of the pull request for incident {incident_key}.
-            PR details: {pr_data}
-            
-            Use GitHub MCP tools to:
-            - Get current pull request status and details
-            - Check if the PR has been approved and/or merged
-            - Monitor any review comments or requested changes
-            
-            Determine if the PR has been approved and/or merged and provide status update.
-            """,
-            expected_output="PR status with current state (under review, approved, merged)",
-            agent=self.agents['pr_manager']
-        )
-        
-        # Execute status check
-        status_result = status_task.execute()
-        
-        # Update incident metadata
-        self.state_manager.update_incident_metadata(incident_key, {
-            "pr_status_check": status_result,
-            "status_checked_at": datetime.now().isoformat()
-        })
-        
-        # Determine next state based on PR status
-        if "merged" in status_result.lower():
-            self.state_manager.transition_incident_state(
-                incident_key,
-                WorkflowState.PR_MERGED,
-                {"pr_merged": True}
-            )
-        elif "approved" in status_result.lower():
-            self.state_manager.transition_incident_state(
-                incident_key,
-                WorkflowState.PR_APPROVED,
-                {"pr_approved": True}
-            )
-        else:
-            # Still under review - no state change, just update metadata
-            pass
-        
-        return {
-            "success": True,
-            "step": "pr_status_check",
-            "result": status_result,
-            "incident_key": incident_key
-        }
-    
-    def _monitor_deployment_step(self, incident: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Monitor deployment after PR merge"""
-        incident_key = incident['key']
-        
-        # Transition to deployment monitoring
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.DEPLOYMENT_IN_PROGRESS,
-            {"step": "deployment_monitoring", "started_at": datetime.now().isoformat()}
-        )
-        
-        # Create deployment monitoring task
-        deploy_task = Task(
-            description=f"""
-            Monitor the deployment progress for the fix applied in incident {incident_key}.
-            Check namespace: {inputs.get('namespace', 'production')}
-            
-            Use Kubernetes MCP tools to:
-            - Monitor pod status using kubernetes_pod_list and kubernetes_pod_get
-            - Check deployment health using kubernetes_resource_list for deployments
-            - Monitor resource usage with kubernetes_pod_top
-            - Watch for any new events using kubernetes_event_list
-            
-            Verify that the deployment is successful, pods are healthy, and no new issues have emerged.
-            """,
-            expected_output="Deployment status and pod health verification",
-            agent=self.agents['deployment_monitor']
-        )
-        
-        # Execute deployment monitoring
-        deploy_result = deploy_task.execute()
-        
-        # Update incident metadata
-        self.state_manager.update_incident_metadata(incident_key, {
-            "deployment_result": deploy_result,
-            "deployment_monitored_at": datetime.now().isoformat()
-        })
-        
-        # Transition to deployment complete
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.DEPLOYMENT_COMPLETE,
-            {"deployment_successful": True}
-        )
-        
-        return {
-            "success": True,
-            "step": "deployment_monitoring",
-            "result": deploy_result,
-            "incident_key": incident_key
-        }
-    
-    def _execute_verification_step(self, incident: Dict[str, Any], inputs: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute final verification step"""
-        incident_key = incident['key']
-        
-        # Transition to verification in progress
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.VERIFICATION_IN_PROGRESS,
-            {"step": "verification", "started_at": datetime.now().isoformat()}
-        )
-        
-        # Create verification task
-        verify_task = Task(
-            description=f"""
-            Verify that incident {incident_key} has been fully resolved.
-            
-            Verification steps using available MCP tools:
-            1. Use kubernetes_pod_list and kubernetes_event_list to check that the original issue is no longer present
-            2. Use kubernetes_pod_top to verify resource usage is healthy
-            3. Use kubernetes_configuration_view to confirm system health in namespace: {inputs.get('namespace', 'production')}
-            4. Update JSM incident with verification results using JSM tools
-            5. If verified, resolve the incident in JSM
-            6. Check for any related open incidents that might need attention
-            
-            Use JSM tools to update the incident with verification status.
-            Focus on ensuring the incident is truly resolved and can be closed.
-            """,
-            expected_output="Verification results and final incident resolution status with JSM updates",
-            agent=self.agents['deployment_monitor']
-        )
-        
-        # Execute verification
-        verify_result = verify_task.execute()
-        
-        # Update JSM incident with verification results
-        try:
-            jsm_updater = JSMIncidentUpdaterTool()
-            jsm_update_result = jsm_updater._run(
-                incident_key=incident_key,
-                update_type="resolution",
-                content=f"## Verification Complete\n\n{verify_result}\n\n**Status:** Issue verified as resolved",
-                internal_only=False
-            )
-            logger.info(f"Updated JSM incident {incident_key} with verification: {jsm_update_result}")
-            
-            # If verification successful, resolve the incident
-            if "successful" in verify_result.lower() or "resolved" in verify_result.lower():
-                jsm_resolver = JSMIncidentResolverTool()
-                resolve_result = jsm_resolver._run(
-                    incident_key=incident_key,
-                    action="resolve",
-                    comment="Automatically resolved after successful verification by autonomous SRE system"
-                )
-                logger.info(f"Resolved JSM incident {incident_key}: {resolve_result}")
-                
-        except Exception as e:
-            logger.error(f"Failed to update/resolve JSM incident {incident_key}: {e}")
-        
-        # Update incident metadata
-        self.state_manager.update_incident_metadata(incident_key, {
-            "verification_result": verify_result,
-            "verification_completed_at": datetime.now().isoformat()
-        })
-        
-        # Transition to resolved
-        self.state_manager.transition_incident_state(
-            incident_key,
-            WorkflowState.INCIDENT_RESOLVED,
-            {"verification_successful": True, "resolved_at": datetime.now().isoformat()}
-        )
-        
-        return {
-            "success": True,
-            "step": "verification",
-            "result": verify_result,
-            "incident_key": incident_key
-        }
-    
-    def test_jsm_integration(self) -> Dict[str, Any]:
-        """
-        Test JSM integration to ensure all tools are working
-        
-        Returns:
-            Dict containing test results
-        """
-        logger.info("Testing JSM integration...")
-        
-        test_results = {
-            "timestamp": datetime.now().isoformat(),
-            "tests": {}
-        }
-        
-        try:
-            # Test 1: Service Desk Monitor
-            jsm_monitor = JSMServiceDeskMonitorTool()
-            monitor_result = jsm_monitor._run(query_type="list")
-            
-            # Validate the result
-            if "❌ Failed to monitor service desk" in monitor_result:
-                raise Exception(f"Service desk monitor failed: {monitor_result}")
-            elif "📋 Recent requests" in monitor_result or "No open" in monitor_result:
-                test_results["tests"]["service_desk_monitor"] = {
-                    "success": True,
-                    "result": "Successfully retrieved service desk data"
-                }
-            else:
-                test_results["tests"]["service_desk_monitor"] = {
-                    "success": False,
-                    "error": f"Unexpected response format: {monitor_result[:200]}..."
-                }
-            
-        except Exception as e:
-            test_results["tests"]["service_desk_monitor"] = {
-                "success": False,
-                "error": str(e)
-            }
-        
-        try:
-            # Test 2: Knowledge Search
-            jsm_knowledge = JSMKnowledgeSearchTool()
-            knowledge_result = jsm_knowledge._run(search_query="error", max_results=3)
-            
-            # Validate the result  
-            if "❌ Failed to search knowledge base" in knowledge_result:
-                test_results["tests"]["knowledge_search"] = {
-                    "success": False,
-                    "error": f"Knowledge search failed: {knowledge_result}"
-                }
-            elif "📚 Knowledge base results" in knowledge_result or "No knowledge base articles found" in knowledge_result:
-                test_results["tests"]["knowledge_search"] = {
-                    "success": True,
-                    "result": "Successfully searched knowledge base"
-                }
-            else:
-                test_results["tests"]["knowledge_search"] = {
-                    "success": False,
-                    "error": f"Unexpected response format: {knowledge_result[:200]}..."
-                }
-            
-        except Exception as e:
-            test_results["tests"]["knowledge_search"] = {
-                "success": False,
-                "error": str(e)
-            }
-        
-        try:
-            # Test 3: Comprehensive Tool
-            jsm_comprehensive = JSMComprehensiveTool()
-            comprehensive_result = jsm_comprehensive._run(operation="get_service_desks", limit=5)
-            test_results["tests"]["comprehensive_tool"] = {
-                "success": True,
-                "result": "Successfully accessed comprehensive JSM API"
-            }
-            
-        except Exception as e:
-            test_results["tests"]["comprehensive_tool"] = {
-                "success": False,
-                "error": str(e)
-            }
-        
-        # Calculate overall success
-        successful_tests = sum(1 for test in test_results["tests"].values() if test["success"])
-        total_tests = len(test_results["tests"])
-        
-        test_results["summary"] = {
-            "total_tests": total_tests,
-            "successful_tests": successful_tests,
-            "overall_success": successful_tests == total_tests
-        }
-        
-        logger.info(f"JSM integration test completed: {successful_tests}/{total_tests} tests passed")
-        
-        return test_results
-
-    def test_github_mcp_integration(self) -> Dict[str, Any]:
-        """
-        Test GitHub MCP integration to ensure remote server connectivity
-        
-        Returns:
-            Dict containing test results
-        """
-        logger.info("Testing GitHub MCP integration...")
-        
-        test_results = {
-            "timestamp": datetime.now().isoformat(),
-            "tests": {}
-        }
-        
-        try:
-            # Test 1: GitHub MCP Tool Initialization
-            github_tools = get_github_mcp_tools(toolsets=['repos'], read_only=True)
-            test_results["tests"]["github_mcp_initialization"] = {
-                "success": True,
-                "result": "Successfully initialized GitHub MCP tools"
-            }
-            
-        except Exception as e:
-            test_results["tests"]["github_mcp_initialization"] = {
-                "success": False,
-                "error": str(e)
-            }
-        
-        try:
-            # Test 2: GitHub MCP Tool Configuration
-            github_tools_full = get_github_mcp_tools(
-                toolsets=['repos', 'issues', 'pull_requests'],
-                read_only=False
-            )
-            test_results["tests"]["github_mcp_configuration"] = {
-                "success": True,
-                "result": "Successfully configured GitHub MCP tools with multiple toolsets"
-            }
-            
-        except Exception as e:
-            test_results["tests"]["github_mcp_configuration"] = {
-                "success": False,
-                "error": str(e)
-            }
-        
-        # Calculate overall success
-        successful_tests = sum(1 for test in test_results["tests"].values() if test["success"])
-        total_tests = len(test_results["tests"])
-        
-        test_results["summary"] = {
-            "total_tests": total_tests,
-            "successful_tests": successful_tests,
-            "overall_success": successful_tests == total_tests
-        }
-        
-        logger.info(f"GitHub MCP integration test completed: {successful_tests}/{total_tests} tests passed")
-        
-        return test_results
-
-    def get_crew_status(self) -> Dict[str, Any]:
-        """Get current status of the crew and its components"""
-        return {
-            "agents_count": len(self.agents),
-            "tasks_count": len(self.tasks),
-            "agents": list(self.agents.keys()),
-            "tasks": list(self.tasks.keys()),
-            "crew_built": self.crew is not None,
-            "config_path": self.config_path,
-            "jsm_tools_enabled": True,
-            "tools_per_agent": {
-                agent_name: len(agent.tools) for agent_name, agent in self.agents.items()
-            }
-        }
-
-# Convenience function for external usage
-def create_self_healing_crew(config_path: str = "src/autonomous_sre_bot/config", log_level: str = "INFO") -> SelfHealingCrew:
-    """
-    Factory function to create a self-healing crew
-    
-    Args:
-        config_path: Path to configuration files
-        log_level: Logging level (DEBUG, INFO, WARNING, ERROR)
-        
-    Returns:
-        Configured SelfHealingCrew instance
-    """
+# Factory function
+def create_self_healing_crew(config_path: str = "src/autonomous_sre_bot/config", 
+                           log_level: str = "INFO") -> SelfHealingCrew:
+    """Create self-healing crew instance"""
     return SelfHealingCrew(config_path=config_path, log_level=log_level)
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Create and test the self-healing crew
-    crew = create_self_healing_crew()
-    
-    print("Self-Healing Crew Status:")
-    status = crew.get_crew_status()
-    print(f"Agents: {status['agents_count']}")
-    print(f"Tasks: {status['tasks_count']}")
-    print(f"JSM Tools Enabled: {status['jsm_tools_enabled']}")
-    print(f"Tools per agent: {status['tools_per_agent']}")
-    
-    # Test JSM integration
-    print("\nTesting JSM Integration...")
-    jsm_test_results = crew.test_jsm_integration()
-    print(f"JSM Tests: {jsm_test_results['summary']['successful_tests']}/{jsm_test_results['summary']['total_tests']} passed")
-    
-    # Test GitHub MCP integration  
-    print("\nTesting GitHub MCP Integration...")
-    github_test_results = crew.test_github_mcp_integration()
-    print(f"GitHub MCP Tests: {github_test_results['summary']['successful_tests']}/{github_test_results['summary']['total_tests']} passed")
-    
-    overall_success = (jsm_test_results['summary']['overall_success'] and 
-                      github_test_results['summary']['overall_success'])
-    
-    if overall_success:
-        print("✅ All integrations are working correctly!")
-        
-        # Example workflow execution (simple test)
-        workflow_inputs = {
-            "priority_threshold": "High",
-            "namespace": "production", 
-            "incident_keywords": ["OutOfMemory", "CrashLoopBackOff", "PodRestartThreshold"],
-            "status_filter": ["Open", "In Progress", "To Do", "Waiting for support"],
-            "order_by": "priority_and_sla"
-        }
-        
-        print("\nExecuting simple self-healing workflow test...")
-        result = crew.execute_simple_workflow_test(workflow_inputs)
-        print(f"Workflow result success: {result['success']}")
-        
-        # Uncomment to run the full state-driven workflow:
-        # print("\nExecuting state-driven self-healing workflow...")
-        # result = crew.execute_self_healing_workflow(workflow_inputs)
-        # print(f"State-driven workflow result: {result}")
-        
-    else:
-        print("❌ Some integrations have issues. Please check configuration.")
-        
-        if not jsm_test_results['summary']['overall_success']:
-            print("\nJSM Integration Issues:")
-            for test_name, test_result in jsm_test_results['tests'].items():
-                if not test_result['success']:
-                    print(f"  - {test_name}: {test_result['error']}")
-        
-        if not github_test_results['summary']['overall_success']:
-            print("\nGitHub MCP Integration Issues:")
-            for test_name, test_result in github_test_results['tests'].items():
-                if not test_result['success']:
-                    print(f"  - {test_name}: {test_result['error']}")
