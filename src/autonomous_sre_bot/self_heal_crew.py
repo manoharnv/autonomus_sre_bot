@@ -16,13 +16,8 @@ from .logging_config import setup_logging
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai.memory import LongTermMemory
 
-# Import JSM State Management Tools
+# Import JSM Specialized Tools (keeping these for specific functionality)
 try:
-    from .tools.jsm_state_management_tools import (
-        get_jsm_state_management_tools,
-        get_jsm_fetcher_tools,
-        get_jsm_state_tools
-    )
     from .tools.jsm_specialized_tools import (
         JSMIncidentUpdaterTool,
         JSMServiceDeskMonitorTool,
@@ -35,11 +30,6 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from autonomous_sre_bot.tools.jsm_state_management_tools import (
-        get_jsm_state_management_tools,
-        get_jsm_fetcher_tools,
-        get_jsm_state_tools
-    )
     from autonomous_sre_bot.tools.jsm_specialized_tools import (
         JSMIncidentUpdaterTool,
         JSMServiceDeskMonitorTool,
@@ -50,6 +40,7 @@ except ImportError:
 # Import MCP tools
 from .tools.mcp_github_tool import get_github_mcp_tools
 from .tools.kubernetes_crewai_tools import get_kubernetes_crewai_tools
+from .tools.jira_mcp_tools import get_support_team_jira_tools, get_atlassian_mcp_tools
 
 # Load environment variables
 load_dotenv()
@@ -61,9 +52,10 @@ class SelfHealingCrew:
     Refactored Autonomous SRE Self-Healing Crew
     
     Architecture:
-    1. Agent-driven workflow: Agents use JSM State Manager tools to fetch and manage incidents
-    2. JSM as source of truth: All state management goes through JSM tools
-    3. Independent execution: Crew runs without external state management orchestration
+    1. Agent-driven workflow: Agents use direct JIRA MCP tools for issue management
+    2. JIRA as source of truth: All incident state management goes through JIRA MCP tools
+    3. Consistent tool usage: Follows the same pattern as Kubernetes MCP tools
+    4. Independent execution: Crew runs without external state management orchestration
     """
     
     def __init__(self, config_path: str = "src/autonomous_sre_bot/config", log_level: str = "INFO"):
@@ -129,14 +121,17 @@ class SelfHealingCrew:
         logger.info("GitHub integration validation complete")
     
     def _build_agents(self):
-        """Build all agents with JSM State Management tools"""
+        """Build all agents with direct MCP tools (following Kubernetes pattern)"""
         
-        # Get JSM state management tools
-        jsm_state_tools = get_jsm_state_management_tools(self.config_path)
-        jsm_fetcher_tools = get_jsm_fetcher_tools(self.config_path)
-        jsm_state_only_tools = get_jsm_state_tools(self.config_path)
+        # Get JIRA MCP Tools directly (following the Kubernetes pattern)
+        try:
+            jira_mcp_tools = get_support_team_jira_tools()
+            logger.info(f"Successfully got {len(jira_mcp_tools)} JIRA MCP tools")
+        except Exception as e:
+            logger.warning(f"JIRA MCP tools not available: {e}")
+            jira_mcp_tools = []
         
-        # Additional JSM tools
+        # Additional JSM tools (keeping specialized tools for now)
         jsm_knowledge_search = JSMKnowledgeSearchTool()
         jsm_sla_monitor = JSMSLAMonitorTool()
         jsm_service_monitor = JSMServiceDeskMonitorTool()
@@ -145,8 +140,8 @@ class SelfHealingCrew:
         # Agent 1: Incident Fetcher and Coordinator Agent
         incident_coordinator_config = self.agents_config['jira_monitor']
         
-        # Tools for incident coordination: fetch incidents, check states, transition states
-        coordinator_tools = jsm_fetcher_tools + jsm_state_only_tools + [
+        # Tools for incident coordination: JIRA MCP tools + specialized JSM tools
+        coordinator_tools = jira_mcp_tools + [
             jsm_service_monitor,
             jsm_sla_monitor,
             jsm_knowledge_search
@@ -156,17 +151,17 @@ class SelfHealingCrew:
             role="Incident Coordinator and Fetcher",
             goal="""
             Fetch incidents assigned to the autonomous SRE system and coordinate their resolution.
-            Use JSM tools to find incidents that need automated resolution and manage their workflow states.
+            Use JIRA MCP tools to find incidents that need automated resolution and manage their workflow states.
             """,
             backstory="""
             You are the incident coordinator for the autonomous SRE system. Your job is to:
-            1. Fetch incidents from JIRA based on assignee and priority criteria
-            2. Check the current state of incidents using JSM state management tools
+            1. Fetch incidents from JIRA using MCP tools for searching and getting issue details
+            2. Check the current state of incidents using JIRA MCP tools
             3. Coordinate with other agents to resolve incidents
-            4. Transition incident states as work progresses
+            4. Transition incident states using JIRA MCP transition tools
             5. Ensure incidents are properly tracked throughout the resolution process
             
-            You understand the workflow states and can manage incident lifecycles effectively.
+            You have access to the full JIRA MCP toolkit and can manage incident lifecycles effectively.
             """,
             tools=coordinator_tools,
             max_iter=incident_coordinator_config.get('max_iter', 3),
@@ -179,7 +174,7 @@ class SelfHealingCrew:
         # Agent 2: Root Cause Analyzer Agent
         rca_config = self.agents_config['root_cause_analyzer']
         
-        rca_tools = jsm_state_only_tools + [
+        rca_tools = jira_mcp_tools + [
             jsm_knowledge_search,
             jsm_incident_updater
         ]
@@ -217,7 +212,7 @@ class SelfHealingCrew:
         # Agent 3: Code Fix Generator and PR Manager Agent
         fix_config = self.agents_config['code_fix_generator']
         
-        fix_tools = jsm_state_only_tools + [
+        fix_tools = jira_mcp_tools + [
             jsm_knowledge_search,
             jsm_incident_updater
         ]
@@ -257,7 +252,7 @@ class SelfHealingCrew:
         # Agent 4: Deployment Monitor Agent
         deploy_config = self.agents_config['deployment_monitor']
         
-        deploy_tools = jsm_state_only_tools + [jsm_incident_updater]
+        deploy_tools = jira_mcp_tools + [jsm_incident_updater]
         
         # Get Kubernetes MCP tools for deployment monitoring
         try:
@@ -288,7 +283,7 @@ class SelfHealingCrew:
             llm=self.llm
         )
         
-        logger.info("Successfully built all 4 agents with JSM State Management tools")
+        logger.info("Successfully built all 4 agents with direct JIRA MCP tools")
         
         # Log tool counts for debugging
         for agent_name, agent in self.agents.items():
@@ -300,22 +295,22 @@ class SelfHealingCrew:
         # Task 1: Fetch and Coordinate Incidents
         self.tasks['fetch_and_coordinate'] = Task(
             description="""
-            Use JSM State Management tools to fetch incidents that need automated resolution.
+            Use JIRA MCP tools to fetch incidents that need automated resolution.
             
             Your workflow:
-            1. Use jsm_incident_fetcher to get incidents assigned to the autonomous SRE system
+            1. Use JIRA MCP search tools to get incidents assigned to the autonomous SRE system
                - Look for incidents with high or critical priority
                - Check for incidents assigned to 'autonomous-sre' or similar
             2. For each incident found:
-               - Use jsm_state_checker to get the current workflow state
+               - Use JIRA MCP get issue tools to get the current workflow state and details
                - Determine what action is needed based on the state
-               - Use jsm_state_transition to move incidents to appropriate states
+               - Use JIRA MCP transition tools to move incidents to appropriate states
             3. Coordinate with other agents to resolve incidents:
                - Delegate analysis tasks to the root cause analyzer
                - Delegate fix generation to the code fix generator
                - Delegate PR management to the PR manager
                - Delegate deployment monitoring to the deployment monitor
-            4. Use jsm_metadata_updater to track progress and store coordination information
+            4. Use JIRA MCP tools to track progress and update incident information
             
             Focus on incidents that can be automatically resolved and ensure proper state management.
             """,
@@ -336,15 +331,15 @@ class SelfHealingCrew:
             Perform detailed root cause analysis for incidents assigned by the coordinator.
             
             Your workflow:
-            1. Use jsm_state_checker to verify incident details and current state
+            1. Use JIRA MCP tools to verify incident details and current state
             2. Use Kubernetes tools to investigate:
                - Pod status and logs using pods_list, pods_get, and pods_logs
                - Recent events using events_list
                - Configuration issues using configuration_view
             3. Use jsm_search_knowledge to find similar incidents and solutions
             4. Analyze the data to identify the root cause
-            5. Use jsm_state_transition to move incident to "RCA Completed"
-            6. Use jsm_metadata_updater to store detailed analysis results
+            5. Use JIRA MCP transition tools to move incident to "RCA Completed"
+            6. Use JIRA MCP tools to update incident with detailed analysis results
             
             Provide thorough, evidence-based root cause analysis.
             """,

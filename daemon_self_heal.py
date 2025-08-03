@@ -19,7 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from autonomous_sre_bot.self_heal_crew import create_self_healing_crew
 from autonomous_sre_bot.logging_config import setup_logging
-from autonomous_sre_bot.jsm_state_manager import create_jsm_state_manager
+from autonomous_sre_bot.tools.jira_mcp_tools import get_support_team_jira_tools
 
 class SelfHealingDaemon:
     """
@@ -39,7 +39,7 @@ class SelfHealingDaemon:
         
         # Initialize components
         self.crew = create_self_healing_crew(config_path, log_level)
-        self.state_manager = create_jsm_state_manager(config_path)
+        # Using direct JIRA MCP tools through the crew now instead of separate state manager
         
         # Setup signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, self._signal_handler)

@@ -1,6 +1,7 @@
 """
 JSM State Manager for Autonomous SRE Workflow
 Manages incident workflow state using JIRA Service Management tickets
+Updated to use MCP Atlassian tools for full JIRA API access and transition support
 """
 
 import os
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 
 try:
-    from .tools.jsm_comprehensive_tool import JSMComprehensiveTool
+    from .tools.jira_mcp_tools import AtlassianMCPManager
     from .tools.jsm_specialized_tools import JSMIncidentUpdaterTool, JSMServiceDeskMonitorTool
 except ImportError:
     # Handle direct execution
@@ -20,7 +21,7 @@ except ImportError:
     import os
     sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     
-    from autonomous_sre_bot.tools.jsm_comprehensive_tool import JSMComprehensiveTool
+    from autonomous_sre_bot.tools.jira_mcp_tools import AtlassianMCPManager
     from autonomous_sre_bot.tools.jsm_specialized_tools import JSMIncidentUpdaterTool, JSMServiceDeskMonitorTool
 
 logger = logging.getLogger(__name__)
@@ -47,10 +48,14 @@ class JSMStateManager:
         self.config_path = config_path
         self.workflow_config = self._load_workflow_config()
         
-        # Initialize JSM tools
-        self.jsm_comprehensive = JSMComprehensiveTool()
-        self.jsm_updater = JSMIncidentUpdaterTool()
+        # Initialize JIRA MCP Manager
+        self.jira_manager = AtlassianMCPManager()
+        
+        # Initialize JSM specialized tools (keeping these for backward compatibility)
         self.jsm_monitor = JSMServiceDeskMonitorTool()
+        self.jsm_updater = JSMIncidentUpdaterTool()
+        
+        logger.info("JSM State Manager initialized with JIRA MCP tools")
         
         # Setup logging
         self._setup_logging()
@@ -86,12 +91,38 @@ class JSMStateManager:
             Tuple of (current_state, incident_data)
         """
         try:
-            # Get incident details from JIRA using JSM comprehensive tool
-            result = self.jsm_comprehensive.get_request(incident_key)
+            # Get incident details from JIRA using MCP tools
+            with self.jira_manager.get_mcp_adapter() as mcp_tools:
+                # Find the get JIRA issue tool
+                jira_get_tool = None
+                for tool in mcp_tools:
+                    if hasattr(tool, 'name') and 'getJiraIssue' in tool.name:
+                        jira_get_tool = tool
+                        break
+                
+                if not jira_get_tool:
+                    raise Exception("JIRA get issue tool not found in MCP tools")
+                
+                # Get issue details
+                result = jira_get_tool._run(
+                    cloudId=os.getenv('JIRA_URL', '').replace('https://', '').replace('.atlassian.net', ''),
+                    issueIdOrKey=incident_key
+                )
+                
             incident_data = json.loads(result) if isinstance(result, str) else result
             
-            # Map JSM status to workflow state
-            jsm_status = incident_data.get('fields', {}).get('status', {}).get('name', '')
+            # Map JSM status to workflow state - handle both MCP and JSM response formats
+            jsm_status = ''
+            if 'fields' in incident_data and 'status' in incident_data['fields']:
+                # JSM API format
+                jsm_status = incident_data['fields']['status'].get('name', '')
+            elif 'status' in incident_data and isinstance(incident_data['status'], dict):
+                # MCP API format  
+                jsm_status = incident_data['status'].get('name', '')
+            elif 'status' in incident_data:
+                # Direct status string
+                jsm_status = incident_data['status']
+                
             current_state = self._map_jsm_status_to_workflow_state(jsm_status)
             
             # Extract workflow metadata from comments or custom fields

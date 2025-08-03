@@ -1,7 +1,6 @@
 from .middleware_logs_tool import MiddlewareLogsTool, MiddlewareLogsInput
 from .log_analyzer_tool import LogAnalyzerTool, LogAnalyzerInput
 from .jsm_incident_creator_tool import JSMIncidentCreatorTool, JSMIncidentInput
-from .jsm_comprehensive_tool import JSMComprehensiveTool
 from .jsm_specialized_tools import (
     JSMIncidentUpdaterTool,
     JSMServiceDeskMonitorTool,
@@ -16,8 +15,6 @@ __all__ = [
     "LogAnalyzerInput",
     "JSMIncidentCreatorTool",
     "JSMIncidentInput",
-    # Comprehensive JSM Tools
-    "JSMComprehensiveTool",
     # Specialized JSM Tools
     "JSMIncidentUpdaterTool", 
     "JSMServiceDeskMonitorTool",

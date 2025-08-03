@@ -11,7 +11,7 @@ from datetime import datetime
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
-from .jsm_comprehensive_tool import JSMComprehensiveTool, JSMConfig
+from .jira_mcp_tools import AtlassianMCPManager
 
 logger = logging.getLogger(__name__)
 
@@ -43,11 +43,11 @@ class JSMIncidentUpdaterTool(BaseTool):
     args_schema: Type[BaseModel] = IncidentUpdateInput
     
     @property
-    def jsm_tool(self):
-        """Get JSM tool instance"""
-        if not hasattr(self, '_jsm_tool'):
-            self._jsm_tool = JSMComprehensiveTool()
-        return self._jsm_tool
+    def jira_manager(self):
+        """Get JIRA MCP Manager instance"""
+        if not hasattr(self, '_jira_manager'):
+            self._jira_manager = AtlassianMCPManager()
+        return self._jira_manager
     
     def _run(self, incident_key: str, update_type: str, content: str, internal_only: bool = True) -> str:
         """Update incident with new information"""
@@ -81,11 +81,24 @@ class JSMIncidentUpdaterTool(BaseTool):
             else:
                 formatted_content = content
             
-            result = self.jsm_tool.create_request_comment(
-                issue_id_or_key=incident_key,
-                body=formatted_content,
-                public=not internal_only
-            )
+            # Use JIRA MCP tools to add comment
+            with self.jira_manager.get_mcp_adapter() as mcp_tools:
+                # Find the add comment tool
+                comment_tool = None
+                for tool in mcp_tools:
+                    if hasattr(tool, 'name') and 'addCommentToJiraIssue' in tool.name:
+                        comment_tool = tool
+                        break
+                
+                if not comment_tool:
+                    return f"❌ Comment tool not found in MCP tools"
+                
+                # Add comment to issue
+                result = comment_tool._run(
+                    cloudId=os.getenv('JIRA_URL', '').replace('https://', '').replace('.atlassian.net', ''),
+                    issueIdOrKey=incident_key,
+                    commentBody=formatted_content
+                )
             
             return f"✅ Incident {incident_key} updated successfully with {update_type}: {result}"
             
@@ -102,174 +115,70 @@ class JSMServiceDeskMonitorTool(BaseTool):
     args_schema: Type[BaseModel] = ServiceDeskQueryInput
     
     @property
-    def jsm_tool(self):
-        """Get JSM tool instance"""
-        if not hasattr(self, '_jsm_tool'):
-            self._jsm_tool = JSMComprehensiveTool()
-        return self._jsm_tool
+    def jira_manager(self):
+        """Get JIRA MCP Manager instance"""
+        if not hasattr(self, '_jira_manager'):
+            self._jira_manager = AtlassianMCPManager()
+        return self._jira_manager
     
-    @property
-    def config(self):
-        """Get configuration"""
-        if not hasattr(self, '_config'):
-            self._config = JSMConfig()
-        return self._config
-    
-    def _extract_field_value(self, request_field_values: list, field_id: str, default: str = 'Unknown'):
-        """
-        Extract field value from JSM requestFieldValues list
-        
-        Args:
-            request_field_values: List of field objects from JSM API
-            field_id: The field ID to extract (e.g., 'summary', 'priority')
-            default: Default value if field not found
-            
-        Returns:
-            Field value or default
-        """
-        if not isinstance(request_field_values, list):
-            return default
-            
-        for field in request_field_values:
-            if isinstance(field, dict) and field.get('fieldId') == field_id:
-                if field_id == 'priority':
-                    # Priority field has nested structure
-                    priority_value = field.get('value', {})
-                    if isinstance(priority_value, dict):
-                        return priority_value.get('name', default)
-                    return default
-                else:
-                    # Regular fields
-                    return field.get('value', default)
-        return default
-
     def _run(self, query_type: str = "list") -> str:
         """Monitor service desk operations"""
         try:
-            # Always use the configured service desk ID from environment variables
-            desk_id = self.config.service_desk_id
-            
-            if query_type == "list":
-                # Get recent customer requests
-                result = self.jsm_tool.get_customer_requests(
-                    service_desk_id=desk_id,
-                    limit=50
+            # Use JIRA MCP tools to search for issues
+            with self.jira_manager.get_mcp_adapter() as mcp_tools:
+                # Find the search tool
+                search_tool = None
+                for tool in mcp_tools:
+                    if hasattr(tool, 'name') and 'searchJiraIssuesUsingJql' in tool.name:
+                        search_tool = tool
+                        break
+                
+                if not search_tool:
+                    return f"❌ JIRA search tool not found in MCP tools"
+                
+                # Build JQL query based on query type
+                if query_type == "list":
+                    jql = "project in (SUP) ORDER BY created DESC"
+                elif query_type == "open_incidents":
+                    jql = "project in (SUP) AND status in ('To Do', 'In Progress', 'Open', 'New') AND priority in (High, Highest, Critical) ORDER BY created DESC"
+                elif query_type in ["high_priority", "sla_breach"]:
+                    jql = "project in (SUP) AND priority in (High, Highest, Critical) ORDER BY created DESC"
+                else:
+                    jql = "project in (SUP) ORDER BY created DESC"
+                
+                # Execute search
+                result = search_tool._run(
+                    cloudId=os.getenv('JIRA_URL', '').replace('https://', '').replace('.atlassian.net', ''),
+                    jql=jql,
+                    maxResults=10
                 )
                 
-                # Handle both string and dict results
+                # Format results
                 if isinstance(result, str):
                     try:
-                        requests_data = json.loads(result)
+                        search_data = json.loads(result)
                     except json.JSONDecodeError:
-                        return f"📋 Recent requests data: {result}"
+                        return f"� {query_type} results: {result}"
                 else:
-                    requests_data = result
+                    search_data = result
                 
-                # Format for easy reading - handle both dict with 'values' and direct list
-                formatted_requests = []
+                # Extract issues
+                issues = search_data.get('issues', [])
+                if not issues:
+                    return f"✅ No {query_type} issues found"
                 
-                if isinstance(requests_data, dict) and 'values' in requests_data:
-                    request_list = requests_data['values'][:10]  # Show top 10
-                elif isinstance(requests_data, list):
-                    request_list = requests_data[:10]  # Show top 10
-                else:
-                    return f"📋 Recent requests raw data: {json.dumps(requests_data, indent=2)}"
+                formatted_issues = []
+                for issue in issues:
+                    formatted_issues.append({
+                        'key': issue.get('key', 'N/A'),
+                        'summary': issue.get('fields', {}).get('summary', 'No summary'),
+                        'status': issue.get('fields', {}).get('status', {}).get('name', 'Unknown'),
+                        'priority': issue.get('fields', {}).get('priority', {}).get('name', 'Unknown'),
+                        'created': issue.get('fields', {}).get('created', 'Unknown'),
+                        'assignee': issue.get('fields', {}).get('assignee', {}).get('displayName', 'Unassigned') if issue.get('fields', {}).get('assignee') else 'Unassigned'
+                    })
                 
-                for req in request_list:
-                    if isinstance(req, dict):
-                        try:
-                            # Extract summary from requestFieldValues list
-                            summary = self._extract_field_value(req.get('requestFieldValues', []), 'summary', 'No summary')
-                            
-                            formatted_requests.append({
-                                'key': req.get('issueKey', 'N/A'),
-                                'summary': summary,
-                                'status': req.get('currentStatus', {}).get('status', 'Unknown'),
-                                'created': req.get('createdDate', 'Unknown')
-                            })
-                        except (AttributeError, TypeError) as e:
-                            # Skip malformed entries
-                            logger.warning(f"Skipping malformed request entry: {req}, error: {e}")
-                            continue
-                
-                return f"📋 Recent requests: {json.dumps(formatted_requests, indent=2)}"
-                    
-            elif query_type == "open_incidents":
-                # Get all customer requests and filter for open high-priority ones
-                result = self.jsm_tool.get_customer_requests(
-                    service_desk_id=desk_id,
-                    limit=2
-                )
-                
-                # Handle both string and dict results
-                if isinstance(result, str):
-                    try:
-                        requests_data = json.loads(result)
-                    except json.JSONDecodeError:
-                        return f"🚨 Open incidents data: {result}"
-                else:
-                    requests_data = result
-                
-                # Filter for open incidents with high priority - handle both dict and list
-                open_incidents = []
-                
-                if isinstance(requests_data, dict) and 'values' in requests_data:
-                    request_list = requests_data['values']
-                elif isinstance(requests_data, list):
-                    request_list = requests_data
-                else:
-                    return f"🚨 Open incidents raw data: {json.dumps(requests_data, indent=2)}"
-                
-                for req in request_list:
-                    if isinstance(req, dict):
-                        try:
-                            status = req.get('currentStatus', {}).get('status', '').lower()
-                            
-                            # Extract priority from requestFieldValues list
-                            priority = self._extract_field_value(req.get('requestFieldValues', []), 'priority', '').lower()
-                            summary = self._extract_field_value(req.get('requestFieldValues', []), 'summary', 'No summary')
-                            
-                            # Filter for open/active statuses and high priorities
-                            if any(open_status in status for open_status in ['open', 'in progress', 'to do', 'waiting', 'new']) or \
-                               any(high_pri in priority for high_pri in ['high', 'highest', 'critical', 'urgent']):
-                                open_incidents.append({
-                                    'key': req.get('issueKey', 'N/A'),
-                                    'summary': summary,
-                                    'status': req.get('currentStatus', {}).get('status', 'Unknown'),
-                                    'priority': priority or 'Unknown',
-                                    'created': req.get('createdDate', 'Unknown'),
-                                    'reporter': req.get('reporter', {}).get('displayName', 'Unknown')
-                                })
-                        except (AttributeError, TypeError) as e:
-                            # Skip malformed entries but log them
-                            logger.warning(f"Skipping malformed request entry: {req}, error: {e}")
-                            continue
-                
-                if open_incidents:
-                    return f"🚨 Open high-priority incidents ({len(open_incidents)} found): {json.dumps(open_incidents, indent=2)}"
-                else:
-                    return "✅ No open high-priority incidents found"
-                
-            elif query_type in ["high_priority", "sla_breach"]:
-                # Handle these query types by getting all requests and filtering
-                return self._run("open_incidents")  # Redirect to open_incidents which includes priority filtering
-                
-            elif query_type == "queues":
-                # Get queue information
-                result = self.jsm_tool.get_queues(desk_id, include_count=True)
-                return f"📊 Service desk queues: {result}"
-                
-            elif query_type == "details":
-                # Get service desk details
-                result = self.jsm_tool.get_service_desk(desk_id)
-                return f"ℹ️ Service desk details: {result}"
-                
-            elif query_type == "customers":
-                # Get customer list
-                result = self.jsm_tool.get_customers(desk_id, limit=25)
-                return f"👥 Customers: {result}"
-            
-            return result
+                return f"📋 {query_type} results ({len(formatted_issues)} found): {json.dumps(formatted_issues, indent=2)}"
         
         except Exception as e:
             return f"❌ Failed to monitor service desk: {str(e)}"
@@ -284,35 +193,96 @@ class JSMKnowledgeSearchTool(BaseTool):
     args_schema: Type[BaseModel] = KnowledgeSearchInput
     
     @property
-    def jsm_tool(self):
-        """Get JSM tool instance"""
-        if not hasattr(self, '_jsm_tool'):
-            self._jsm_tool = JSMComprehensiveTool()
-        return self._jsm_tool
+    def jira_manager(self):
+        """Get JIRA MCP Manager instance"""
+        if not hasattr(self, '_jira_manager'):
+            self._jira_manager = AtlassianMCPManager()
+        return self._jira_manager
     
     def _run(self, search_query: str, service_desk_id: str = None, max_results: int = 10) -> str:
-        """Search knowledge base"""
+        """Search knowledge base using JIRA MCP tools"""
         try:
-            result = self.jsm_tool.search_articles(
-                query=search_query,
-                service_desk_id=service_desk_id,
-                limit=max_results
-            )
-            
-            # Parse and format results
-            articles_data = json.loads(result)
-            if 'values' in articles_data and articles_data['values']:
-                formatted_articles = []
-                for article in articles_data['values']:
-                    formatted_articles.append({
-                        'title': article.get('title'),
-                        'excerpt': article.get('excerpt', {}).get('value', ''),
-                        'url': article.get('_links', {}).get('web')
-                    })
+            # Use JIRA MCP tools to search for Confluence content or JIRA comments
+            with self.jira_manager.get_mcp_adapter() as mcp_tools:
+                # Find Confluence search tool
+                confluence_search_tool = None
+                for tool in mcp_tools:
+                    if hasattr(tool, 'name') and 'searchConfluenceUsingCql' in tool.name:
+                        confluence_search_tool = tool
+                        break
                 
-                return f"📚 Knowledge base results for '{search_query}': {json.dumps(formatted_articles, indent=2)}"
-            else:
-                return f"📚 No knowledge base articles found for '{search_query}'"
+                if confluence_search_tool:
+                    # Search Confluence for knowledge articles
+                    cql_query = f'text ~ "{search_query}" AND type = "page"'
+                    result = confluence_search_tool._run(
+                        cloudId=os.getenv('JIRA_URL', '').replace('https://', '').replace('.atlassian.net', ''),
+                        cql=cql_query,
+                        limit=max_results
+                    )
+                    
+                    if isinstance(result, str):
+                        try:
+                            search_data = json.loads(result)
+                        except json.JSONDecodeError:
+                            return f"📚 Knowledge search results: {result}"
+                    else:
+                        search_data = result
+                    
+                    # Extract and format results
+                    results = search_data.get('results', [])
+                    if results:
+                        formatted_articles = []
+                        for article in results:
+                            formatted_articles.append({
+                                'title': article.get('title', 'Untitled'),
+                                'excerpt': article.get('excerpt', ''),
+                                'url': article.get('_links', {}).get('webui', '') if article.get('_links') else '',
+                                'space': article.get('space', {}).get('name', 'Unknown') if article.get('space') else 'Unknown'
+                            })
+                        
+                        return f"📚 Knowledge base results for '{search_query}': {json.dumps(formatted_articles, indent=2)}"
+                    else:
+                        return f"📚 No knowledge base articles found for '{search_query}'"
+                else:
+                    # Fallback to JIRA issue search for historical solutions
+                    jira_search_tool = None
+                    for tool in mcp_tools:
+                        if hasattr(tool, 'name') and 'searchJiraIssuesUsingJql' in tool.name:
+                            jira_search_tool = tool
+                            break
+                    
+                    if jira_search_tool:
+                        jql = f'text ~ "{search_query}" AND resolution is not EMPTY ORDER BY resolved DESC'
+                        result = jira_search_tool._run(
+                            cloudId=os.getenv('JIRA_URL', '').replace('https://', '').replace('.atlassian.net', ''),
+                            jql=jql,
+                            maxResults=max_results
+                        )
+                        
+                        if isinstance(result, str):
+                            try:
+                                search_data = json.loads(result)
+                            except json.JSONDecodeError:
+                                return f"📚 Historical solutions: {result}"
+                        else:
+                            search_data = result
+                        
+                        issues = search_data.get('issues', [])
+                        if issues:
+                            formatted_solutions = []
+                            for issue in issues:
+                                formatted_solutions.append({
+                                    'key': issue.get('key'),
+                                    'summary': issue.get('fields', {}).get('summary'),
+                                    'resolution': issue.get('fields', {}).get('resolution', {}).get('name') if issue.get('fields', {}).get('resolution') else 'Unknown',
+                                    'resolved': issue.get('fields', {}).get('resolutiondate', 'Unknown')
+                                })
+                            
+                            return f"📚 Historical solutions for '{search_query}': {json.dumps(formatted_solutions, indent=2)}"
+                        else:
+                            return f"📚 No historical solutions found for '{search_query}'"
+                    else:
+                        return f"❌ No search tools available for knowledge search"
                 
         except Exception as e:
             return f"❌ Failed to search knowledge base: {str(e)}"
@@ -325,31 +295,71 @@ class JSMSLAMonitorTool(BaseTool):
     )
     
     @property
-    def jsm_tool(self):
-        """Get JSM tool instance"""
-        if not hasattr(self, '_jsm_tool'):
-            self._jsm_tool = JSMComprehensiveTool()
-        return self._jsm_tool
+    def jira_manager(self):
+        """Get JIRA MCP Manager instance"""
+        if not hasattr(self, '_jira_manager'):
+            self._jira_manager = AtlassianMCPManager()
+        return self._jira_manager
     
     def _run(self, incident_key: str) -> str:
-        """Get SLA information for an incident"""
+        """Get SLA information for an incident using JIRA MCP tools"""
         try:
-            result = self.jsm_tool.get_request_sla(incident_key)
-            sla_data = json.loads(result)
-            
-            if 'values' in sla_data:
-                sla_summary = []
-                for sla in sla_data['values']:
-                    sla_summary.append({
-                        'name': sla.get('name'),
-                        'remaining_time': sla.get('remainingTime', {}).get('friendly'),
-                        'breached': sla.get('breached', False),
-                        'elapsed_percentage': sla.get('elapsedPercentage')
-                    })
+            # Use JIRA MCP tools to get issue details including SLA information
+            with self.jira_manager.get_mcp_adapter() as mcp_tools:
+                # Find the get issue tool
+                get_issue_tool = None
+                for tool in mcp_tools:
+                    if hasattr(tool, 'name') and 'getJiraIssue' in tool.name:
+                        get_issue_tool = tool
+                        break
+                
+                if not get_issue_tool:
+                    return f"❌ JIRA get issue tool not found"
+                
+                # Get issue details
+                result = get_issue_tool._run(
+                    cloudId=os.getenv('JIRA_URL', '').replace('https://', '').replace('.atlassian.net', ''),
+                    issueIdOrKey=incident_key,
+                    expand="customFields"
+                )
+                
+                if isinstance(result, str):
+                    try:
+                        issue_data = json.loads(result)
+                    except json.JSONDecodeError:
+                        return f"⏱️ SLA data for {incident_key}: {result}"
+                else:
+                    issue_data = result
+                
+                # Extract basic timing information from standard fields
+                created = issue_data.get('fields', {}).get('created', 'Unknown')
+                updated = issue_data.get('fields', {}).get('updated', 'Unknown')
+                resolved = issue_data.get('fields', {}).get('resolutiondate')
+                priority = issue_data.get('fields', {}).get('priority', {}).get('name', 'Unknown')
+                status = issue_data.get('fields', {}).get('status', {}).get('name', 'Unknown')
+                
+                # Calculate basic SLA approximation based on priority
+                priority_sla_hours = {
+                    'Critical': 4,
+                    'High': 8,
+                    'Medium': 24,
+                    'Low': 72
+                }
+                
+                expected_sla_hours = priority_sla_hours.get(priority, 24)
+                
+                sla_summary = {
+                    'incident_key': incident_key,
+                    'priority': priority,
+                    'status': status,
+                    'created': created,
+                    'updated': updated,
+                    'resolved': resolved,
+                    'expected_sla_hours': expected_sla_hours,
+                    'note': 'Basic SLA estimation based on priority. For detailed SLA tracking, integrate with JSM Service Management.'
+                }
                 
                 return f"⏱️ SLA status for {incident_key}: {json.dumps(sla_summary, indent=2)}"
-            else:
-                return f"⏱️ No SLA information found for {incident_key}"
                 
         except Exception as e:
             return f"❌ Failed to get SLA information: {str(e)}"
