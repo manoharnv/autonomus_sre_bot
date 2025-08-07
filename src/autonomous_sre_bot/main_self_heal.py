@@ -12,8 +12,8 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-# Add the src directory to Python path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# Add the src directory to Python path for proper imports
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 
 from autonomous_sre_bot.self_heal_crew import create_self_healing_crew
 
@@ -21,15 +21,16 @@ def setup_logging(log_level: str = "INFO"):
     """Setup logging configuration"""
     log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     
-    # Create logs directory
-    Path("logs").mkdir(exist_ok=True)
+    # Create logs directory (relative to project root)
+    logs_dir = Path("logs")
+    logs_dir.mkdir(exist_ok=True)
     
     # Setup file and console logging
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
         format=log_format,
         handlers=[
-            logging.FileHandler("logs/refactored_self_heal_main.log"),
+            logging.FileHandler(logs_dir / "refactored_self_heal_main.log"),
             logging.StreamHandler(sys.stdout)
         ]
     )
@@ -81,29 +82,39 @@ def main():
     )
     parser.add_argument(
         "--assignee", 
-        default="manoharnv",
-        help="Filter incidents by assignee (default: autonomous-sre)"
+        default="557058:b8c43659-da51-41e3-a0a3-010b05cbc4a3",
+        help="Filter incidents by assignee (default: 557058:b8c43659-da51-41e3-a0a3-010b05cbc4a3)"
+    )
+    parser.add_argument(
+        "--ticket-id",
+        help="Filter incidents by ticket ID"
     )
     parser.add_argument(
         "--priority", 
-        default="High,Critical",
-        help="Filter incidents by priority (comma-separated, default: High,Critical)"
+        default="High",
+        help="Filter incidents by priority (comma-separated, default: High)"
     )
     parser.add_argument(
         "--max-incidents", 
         type=int,
-        default=5,
-        help="Maximum number of incidents to process (default: 5)"
+        default=1,
+        help="Maximum number of incidents to process (default: 1)"
     )
     parser.add_argument(
         "--config-path",
-        default="src/autonomous_sre_bot/config",
+        default="config",
         help="Path to configuration files"
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Run in simulation mode without making actual changes"
+    )
+
+    parser.add_argument(
+        "--github-repo-url",
+        default="https://github.com/manoharnv/faulty-app.git",
+        help="URL of the GitHub repository (default: https://github.com/manoharnv/faulty-app.git)"
     )
 
     args = parser.parse_args()
@@ -131,7 +142,6 @@ def main():
         # Create and configure the refactored self-healing crew
         logger.info("Initializing refactored self-healing crew...")
         crew = create_self_healing_crew(
-            config_path=args.config_path,
             log_level=args.log_level
         )
         logger.info("Refactored crew initialized successfully")
@@ -144,10 +154,13 @@ def main():
             "priority_filter": args.priority,
             "max_incidents": args.max_incidents,
             "dry_run": args.dry_run,
-            "config_path": args.config_path
+            "config_path": args.config_path,
+            "project_filter": "SUP" ,
+            "github_repo_url": args.github_repo_url,
+            "ticket_id": args.ticket_id
         }
 
-        logger.info("Starting refactored self-healing workflow...")
+        logger.info("Starting self-healing workflow...")
         logger.info(f"Workflow inputs: {json.dumps(workflow_inputs, indent=2)}")
 
         # Execute the workflow
@@ -175,8 +188,9 @@ def main():
             logger.error(f"Error: {result.get('error', 'Unknown error')}")
             logger.error(f"Message: {result.get('message', 'No message')}")
 
-        # Save results to file
-        results_file = f"logs/refactored_self_heal_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        # Save results to file (relative to project root)
+        logs_dir = Path("logs")
+        results_file = logs_dir / f"refactored_self_heal_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(results_file, 'w') as f:
             json.dump({
                 **result,

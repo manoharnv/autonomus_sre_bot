@@ -23,6 +23,7 @@ dependencies = [
     "databricks-sdk>=0.59.0",
     "crewai-tools[mcp]>=0.38.0",
     "pytest>=8.4.1",
+    "google-generativeai>=0.8.5",
 ]
 
 [project.optional-dependencies]
@@ -47,7 +48,6 @@ test = "autonomous_sre_bot.main:test_incident_management"
 incident_management = "autonomous_sre_bot.main:run_incident_management"
 # Self-healing crew scripts
 self_heal = "autonomous_sre_bot.main_self_heal:main"
-self_heal_daemon = "autonomous_sre_bot.daemon_self_heal:main"
 test_self_heal = "autonomous_sre_bot.test_self_heal:main"
 
 [build-system]

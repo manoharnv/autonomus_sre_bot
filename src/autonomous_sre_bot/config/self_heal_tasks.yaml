@@ -1,113 +1,328 @@
 # Autonomous SRE Self-Healing Crew - Task Configuration
 
-# Task 1: Monitor JIRA for New Incidents
+# Task 1: Monitor for New Incidents and Manage Resolution
 monitor_jira_incidents:
   description: >
-    Monitor JIRA Service Management for new incidents that require automated resolution.
-    Use the JSM monitoring tools to search for recently created incidents with high priority 
-    or specific keywords that indicate infrastructure or application issues. Filter for incidents 
-    that can be automatically resolved based on predefined criteria.
+    Manage the complete incident resolution lifecycle by fetching the incident if provided -  ({ticket_id}) or monitoring for new incidents, 
+    assessing their automation feasibility, and coordinating delegated resolution tasks through 
+    specialized agents while ensuring proper workflow compliance and end-to-end issue resolution.
     
-    Tools available:
-    - jsm_monitor_service_desk: Monitor queues and recent requests
-    - jsm_search_knowledge: Search for existing solutions
-    - jsm_monitor_sla: Check SLA status for prioritization
+    MANAGEMENT WORKFLOW:
+    1. **Incident Detection & Assessment**:
+       - Delegate to JIRA Manager to search for high-priority incidents requiring automated resolution
+       - Use workflow inputs to filter incidents:
+         * Project: {project_filter} (default: SUP)
+         * Assignee: {assignee_filter} (default: manoharnv)
+         * Priority: {priority_filter} (default: High)
+         * Max Incidents: {max_incidents} (default: 5)
+       - Look for incidents with specified priority levels from the target project
+       - Check for incidents assigned to the specified assignee or automation users
+       - Use JQL queries to filter actionable incidents based on input parameters
+    
+    2. **Delegation Strategy**:
+       - Assess incident complexity and determine appropriate resolution approach
+       - Delegate root cause analysis tasks to the root_cause_analyzer agent
+       - Coordinate task handoffs between agents throughout the resolution process
+       - Monitor progress of delegated tasks and ensure successful completion
+    
+    3. **Progress Management**:
+       - Track progress through each phase: RCA → Code Fix → Deployment → Validation
+       - Work with JIRA Manager to ensure proper JIRA state transitions occur at each stage
+       - Intervene if agents encounter issues or get stuck
+       - Coordinate communication between agents for smooth handoffs
+    
+    4. **Quality Assurance & Resolution**:
+       - Verify each phase completes successfully before proceeding to next
+       - Ensure incidents are fully resolved, not just partially addressed
+       - Confirm final resolution meets SLA requirements and quality standards
+       - Work with JIRA Manager to close incidents with comprehensive resolution documentation
+    
+    JIRA WORKFLOW STATE MANAGEMENT REQUIREMENTS:
+    - Delegate all JIRA operations to JIRA Manager agent
+    - Coordinate state transitions through delegation:
+      * "To Do → In Progress" (via JIRA Manager when beginning incident management)
+      * "In Progress → RCA Completed" (via root cause analyzer and JIRA Manager delegation)
+      * "RCA Completed → Code Fix Completed" (via code fix generator and JIRA Manager delegation)
+      * "Code Fix Completed → Deployment Done" (via deployment monitor and JIRA Manager delegation)
+      * "Deployment Done → Deployment Validated" (via deployment monitor and JIRA Manager delegation)
+      * "Deployment Validated → Done" (final verification and closure via JIRA Manager)
+    - Provide management updates at each phase with delegation status and progress tracking to JIRA Manager
+    - Escalate through JIRA Manager to "Needs Human Intervention" if any delegated task fails with complete status report
+    
   expected_output: >
-    A structured report containing:
-    - List of new incidents requiring automated attention with JSM keys
-    - Priority assessment and SLA requirements from JSM data
-    - Initial classification of incident types
-    - Knowledge base search results for similar issues
-    - Recommendation on which incidents should proceed to automated resolution
-    Format: JSON with incident details, priority levels, SLA status, and automation feasibility
-  agent: jira_monitor
+    A comprehensive incident management report containing:
+    - List of incidents identified and selected for automated resolution with JIRA keys (filtered by project: {project_filter}, assignee: {assignee_filter}, priority: {priority_filter}, max: {max_incidents})
+    - Incident assessment results: priority, complexity, automation feasibility
+    - Delegation plan and task assignments to specialized agents
+    - Progress tracking through each resolution phase with status updates
+    - Quality verification results for each completed phase
+    - Final resolution confirmation with SLA compliance verification
+    - Complete audit trail of all JIRA state transitions and management decisions
+    - Any escalations or issues requiring human intervention with detailed reasoning
+    Format: Structured management report with incident lifecycle tracking, delegation results, and complete workflow compliance
+  # agent: incident_resolution_manager
+  agent: jira_manager
+# Task 2: JIRA Operations Management
+manage_jira_operations:
+  description: >
+    Handle all JIRA-related operations for the incident resolution process including ticket searches,
+    updates, state transitions, comment management, and workflow compliance on behalf of all other agents.
+    
+    JIRA OPERATIONS WORKFLOW:
+    1. **Ticket Discovery & Management**:
+       - Execute JIRA searches using workflow input parameters:
+         * Project Filter: {project_filter}
+         * Assignee Filter: {assignee_filter} 
+         * Priority Filter: {priority_filter}
+         * Max Results: {max_incidents}
+       - Retrieve ticket details and historical context for Root Cause Analyzer
+       - Use JQL queries incorporating input filters: "project = {project_filter} AND assignee = {assignee_filter} AND priority in ({priority_filter})"
+       - Manage ticket creation if needed for incident tracking
+    
+    2. **State Transition Management**:
+       - Execute all workflow state transitions as coordinated by other agents
+       - Validate transitions are allowed before executing them
+       - Maintain audit trail of all state changes with proper documentation
+    
+    3. **Documentation & Comments**:
+       - Add structured, formatted comments from all agents throughout resolution process
+       - Update tickets with technical findings from Root Cause Analyzer
+       - Document code fix details and PR information from Code Fix Generator
+       - Record deployment status and validation results from Deployment Monitor
+    
+    4. **Progress Tracking & Compliance**:
+       - Maintain comprehensive progress tracking across all incident resolution phases
+       - Ensure all JIRA operations follow organizational standards and audit requirements
+       - Handle escalation workflows and human intervention notifications
+       - Provide status updates to Incident Resolution Manager
+    
+    WORKFLOW COMPLIANCE REQUIREMENTS:
+    - Always use structured, technical markdown formatting for all comments and updates
+    - Include comprehensive details in all ticket updates: agent actions, technical findings, timestamps
+    - Validate and execute state transitions with proper workflow compliance
+    - Maintain complete audit trail of all operations performed on tickets
+    - Handle escalations with clear reasoning and complete status information
+    - Coordinate with all other agents to ensure consistent JIRA documentation
+    
+  expected_output: >
+    Comprehensive JIRA operations report containing:
+    - All JIRA searches executed using input filters (project: {project_filter}, assignee: {assignee_filter}, priority: {priority_filter}, max: {max_incidents}) and results provided to requesting agents
+    - Complete list of state transitions performed with validation results
+    - Summary of all comments and updates added to tickets throughout resolution process
+    - Audit trail of all JIRA operations with timestamps and requesting agents
+    - Any escalations or compliance issues encountered during operations
+    - Final status of all tickets managed during the resolution process
+    Format: Structured JIRA operations log with complete audit trail and compliance verification
+  agent: jira_manager
 
 # Task 2: Analyze Root Cause in Kubernetes
 analyze_kubernetes_root_cause:
   description: >
-    Perform comprehensive root cause analysis for the identified incidents by examining
-    Kubernetes cluster state, pod health, events, and logs. Correlate multiple data sources
-    to identify the underlying cause of the issue. Focus on resource constraints, configuration
-    issues, and application failures. Update the JSM incident with analysis findings.
+    Perform comprehensive root cause analysis by correlating JIRA incident details, Kubernetes cluster state,
+    application logs, and source code to identify the exact cause of the issue. Create a detailed remediation 
+    plan that guides the code fix generator to implement precise solutions.
     
-    Tools available:
-    - jsm_update_incident: Add root cause analysis to the incident
-    - jsm_create_incident: Create new incidents if additional issues found
-    - Kubernetes analysis tools for cluster inspection
+    COMPREHENSIVE ANALYSIS WORKFLOW:
+    1. **JIRA Ticket Deep Dive**:
+       - Read complete ticket description, comments, and historical context
+       - Identify affected services, components, and user-reported symptoms
+       - Extract clues about timing, error patterns, and impact scope
+    
+    2. **Kubernetes Cluster Investigation**:
+       - Examine pod health, deployment status, and service configurations
+       - Analyze events, logs, and resource utilization patterns
+       - Identify failing components and their relationships
+    
+    3. **Source Code Correlation**:
+       - Based on K8s deployment names, namespaces, and error patterns, identify relevant GitHub repositories
+       - Examine deployment manifests, configuration files, and application code
+       - Analyze recent commits and changes that could correlate with incident timing
+       - Review application logs and error stack traces to pinpoint problematic code sections
+    
+    4. **Data Correlation and Root Cause Identification**:
+       - Connect JIRA symptoms with K8s failures and specific code issues
+       - Identify the exact files, functions, or configurations causing the problem
+       - Determine if issue is: code bug, configuration error, resource constraint, or deployment problem
+    
+    5. **Detailed Remediation Planning**:
+       - Create specific fix plan with exact files to modify
+       - Provide code snippets or configuration changes needed
+       - Include testing approach and validation steps
+       - Specify rollback procedures and risk assessment
+    
+    JIRA WORKFLOW REQUIREMENTS:
+    - Delegate all JIRA operations to JIRA Manager agent for ticket updates and state transitions
+    - Work with JIRA Manager to transition incident from "In Progress" to "RCA Completed" upon successful analysis
+    - Provide comprehensive technical findings to JIRA Manager for structured JIRA updates including:
+      * Executive summary of root cause
+      * Detailed investigation steps and evidence from all sources
+      * Specific code/configuration issues identified
+      * Complete remediation plan with file-level details
+      * Testing and validation strategy
+      * Risk assessment and rollback procedures
+    - Work with JIRA Manager to reference specific Kubernetes resources, GitHub files, line numbers, and commit hashes
+    - Include investigation timeline, evidence collected, and confidence assessment
+    - If root cause cannot be determined, escalate through JIRA Manager with detailed analysis log
+    
   expected_output: >
-    A detailed root cause analysis report containing:
-    - Problematic pods and their current state
-    - Relevant Kubernetes events and error patterns
-    - Log analysis with key error messages
-    - Resource utilization assessment
-    - Root cause hypothesis with supporting evidence
-    - Confidence level in the analysis
-    - JSM incident updated with analysis findings
-    Format: Structured analysis with evidence, hypothesis, recommended fix approach, and JSM update confirmation
+    A comprehensive root cause analysis and remediation plan containing:
+    - **Root Cause Summary**: Clear identification of the specific code/configuration causing the issue
+    - **Evidence Correlation**: How JIRA details, K8s state, and source code findings connect
+    - **Affected Components**: Specific services, pods, deployments, and source code ({github_repo_url}) modules involved
+    - **Source Code Analysis**: Exact files, functions, and lines of code with issues identified
+    - **Detailed Fix Plan**: Step-by-step remediation with specific changes needed:
+      * Files to modify with exact paths
+      * Configuration changes required
+      * Code fixes needed with snippets
+      * Deployment manifest updates
+    - **Testing Strategy**: How to validate the fix works
+    - **Risk Assessment**: Potential impact and rollback procedures
+    - **Implementation Priority**: Critical path for fix deployment
+    - **JSM incident updated with comprehensive analysis and transitioned to "RCA Completed"**
+    Format: Structured technical analysis with actionable remediation plan that enables precise code fixes
   agent: root_cause_analyzer
   context:
     - monitor_jira_incidents
+    - manage_jira_operations
 
 # Task 3: Generate Automated Fix and Create Pull Request
 generate_code_fix_and_pr:
   description: >
-    Based on the root cause analysis, generate specific code fixes to resolve the identified
-    issues and create a pull request with the changes. Create Kubernetes manifest updates, 
-    configuration changes, or application fixes as appropriate. Ensure fixes are minimal, 
-    targeted, and follow best practices. Then create a new branch using the JSM ticket ID 
-    and submit a pull request.
+    Implement the detailed remediation plan from root cause analysis by generating specific code fixes 
+    to resolve the identified issues and creating a pull request with the changes. to do this, generate a prompt 
+    for create_pull_request_with_copilot (GHCP agent) to implement the fix in the repo ({github_repo_url}).
     
-    Workflow:
-    1. Generate the specific code fixes based on root cause analysis
-    2. Create a new branch with format: {JSM_TICKET_ID}-automated-fix
-    3. Commit changes to the new branch
-    4. Create pull request with proper title and description
-    5. Update JSM incident with PR details and progress
-    
-    Tools available:
-    - jsm_update_incident: Add progress updates, technical findings, and PR links
-    - GitHub MCP tools: repo access, file operations, branch creation, PR management
-    - Code generation and fix creation tools
+    IMPLEMENTATION WORKFLOW:
+    1. **Read Remediation Plan**: Extract the detailed fix plan from root cause analysis output
+    2. **Follow Specific Instructions**: Implement exactly the files, changes, and configurations specified
+    3. If the remediation plan includes:
+       - **Kubernetes Manifest Modifications**: Update manifests as specified
+       - **Environment Variable Adjustments**: Modify environment variables as needed
+       - **Resource Adjustments**: Change resource limits/requests based on analysis
+       - **Configuration Changes**: Update application configurations as required
+       - **Code Fixes**: Once the fix is working in the k8s environment, implement the code changes
+    3. **Code Implementation**: delegate to create_pull_request_with_copilot (GHCP agent) to implement the fix in the repo ({github_repo_url})
+       - Create branches using JSM ticket ID format: <JSM_TICKET_ID>-automated-fix
+       - Submit pull requests with comprehensive documentation
+       - Validate that fixes address the root cause identified
+    4. **JIRA Updates**: Document implementation progress and transition workflow state
+
+    JIRA WORKFLOW REQUIREMENTS:
+    - Delegate all JIRA operations to JIRA Manager agent for ticket updates and state transitions
+    - Work with JIRA Manager to transition incident from "RCA Completed" to "Code Fix Completed" when PR is ready
+    - Provide implementation details to JIRA Manager for structured JIRA updates
+    - Include fix implementation strategy based on remediation plan and actual code changes made
+    - Coordinate with JIRA Manager to update tickets with GitHub PR links, branch names, and technical implementation details
+    - Provide testing results and validation steps to JIRA Manager for ticket updates
+    - If fix implementation fails, escalate through JIRA Manager with detailed error analysis
+ 
   expected_output: >
-    A comprehensive fix and PR package containing:
-    - Specific code changes or configuration updates
-    - Kubernetes manifest modifications (if applicable)  
-    - Environment variable or resource limit adjustments
-    - Test cases or validation criteria for the fix
-    - New branch created with JSM ticket ID prefix
-    - Pull request created with proper documentation
-    - PR title format: [{JSM_TICKET_ID}] Automated fix for {issue_summary}
-    - PR description linking back to JSM incident
-    - Implementation notes and rollback procedures
-    - JSM incident updated with fix details, PR URL, and progress
-    Format: Combined fix implementation and PR creation report with links and JSM update confirmation
+    A comprehensive fix implementation and PR package containing:
+    - **Implementation Summary**: How the remediation plan was followed and executed
+    - **Specific code changes**: Files modified, configurations updated, manifests changed
+    - **Kubernetes manifest modifications**: If applicable based on remediation plan
+    - **Environment variable or resource adjustments**: As specified in root cause analysis
+    - **Test cases and validation**: Criteria for verifying the fix works
+    - **Branch and PR Details**: 
+      * New branch created with JSM ticket ID prefix
+      * Pull request created with proper documentation
+      * PR title format: [JSM_TICKET_ID] Automated fix for {issue_summary}
+      * PR description linking back to JSM incident and remediation plan
+    - **Implementation notes**: Rollback procedures and risk mitigation
+    - **JSM incident updated**: Fix details, PR URL, and coordination with JIRA Manager for transition to "Code Fix Completed"
+    Format: Combined fix implementation and PR creation report with links and complete workflow compliance
   agent: code_fix_generator
   context:
     - monitor_jira_incidents
+    - manage_jira_operations
     - analyze_kubernetes_root_cause
 
-# Task 4: Monitor Deployment and Verify Resolution
+# Task 4: Monitor Deployment and Validate Resolution
 monitor_deployment_verification:
+  description: >
+    Monitor deployment of fixes and verify incident resolution by coordinating with JIRA Manager 
+    for comprehensive documentation throughout the deployment and validation process.
+    
+    DEPLOYMENT VALIDATION WORKFLOW:
+    1. **Deployment Monitoring**: 
+       - Monitor the deployment of code fixes created by the code fix generator
+       - Track CI/CD pipeline progress and deployment status
+       - Verify deployment completes successfully across environments
+    
+    2. **System Health Verification**:
+       - Perform comprehensive health checks after deployment
+       - Monitor system metrics and error rates before/after deployment
+       - Validate that the original issue symptoms are resolved
+       - Check for any new issues introduced by the fix
+    
+    3. **Validation Testing**:
+       - Execute validation tests as specified in the remediation plan
+       - Verify the fix addresses the root cause identified
+       - Perform regression testing to ensure no new issues
+       - Monitor system stability over time
+    
+    4. **Final Resolution Verification**:
+       - Confirm incident is fully resolved, not just masked
+       - Verify SLA compliance and performance requirements met
+       - Document lessons learned and preventive measures
+       - Ensure complete resolution meets quality standards
+    
+    JIRA WORKFLOW REQUIREMENTS:
+    - Delegate all JIRA operations to JIRA Manager agent for ticket updates and state transitions
+    - Work with JIRA Manager to transition tickets through complete workflow:
+      * "Code Fix Completed" → "Deployment Done" (when deployment succeeds)
+      * "Deployment Done" → "Deployment Validated" (when validation completes)
+      * "Deployment Validated" → "Done" (when incident is fully resolved)
+    - Provide comprehensive validation results to JIRA Manager for structured updates
+    - Include: deployment status, health checks performed, metrics validation, system stability assessment
+    - If deployment fails or validation shows issues, escalate through JIRA Manager with detailed failure analysis and rollback recommendations
+    - Provide final resolution confirmation including lessons learned and preventive measures
+    
+  expected_output: >
+    A comprehensive deployment and validation report containing:
+    - **Deployment Status**: Complete deployment timeline and success confirmation
+    - **Health Check Results**: System health verification before/after deployment
+    - **Validation Testing**: Results of all validation tests and regression checks
+    - **Metrics Analysis**: Before/after performance metrics and error rate analysis
+    - **Issue Resolution**: Confirmation that original issue symptoms are resolved
+    - **System Stability**: Evidence of stable system operation post-deployment
+    - **Final Resolution**: Complete incident resolution with SLA compliance verification
+    - **Lessons Learned**: Preventive measures and process improvements identified
+    - **JIRA Documentation**: Complete workflow compliance through JIRA Manager coordination
+    Format: Structured deployment and validation report with metrics, resolution confirmation, and complete audit trail
+  agent: deployment_monitor
+  context:
+    - monitor_jira_incidents
+    - manage_jira_operations
+    - analyze_kubernetes_root_cause
+    - generate_code_fix_and_pr
+
+# Task 4: Monitor Deployment and Verify Resolution
 monitor_deployment_verification:
   description: >
     Monitor the deployment of the fix through CI/CD pipeline and verify that the incident
     is fully resolved. Check pod health, application metrics, and ensure no new issues
     are introduced. Update the original JIRA incident with resolution status and close it.
+    Follow the complete JIRA workflow through to final resolution.
     
-    Tools available:
-    - jsm_resolve_incident: Mark incident as resolved
-    - jsm_update_incident: Add final resolution details
-    - jsm_monitor_sla: Verify SLA compliance post-resolution
+    JIRA WORKFLOW REQUIREMENTS:
+    - Transition through complete workflow: "Code Fix Completed" → "Deployment Done" → "Deployment Validated" → "Done"
+    - Document deployment progress with real-time updates and health check results
+    - Include before/after metrics, system stability assessment, and validation evidence
+    - Provide comprehensive resolution summary with lessons learned and preventive measures
+    - Ensure final closure includes SLA compliance verification and incident post-mortem
+    
   expected_output: >
     A complete resolution verification report containing:
-    - Deployment status and success confirmation
-    - Post-deployment health checks and monitoring results
-    - Verification that the original issue is resolved
-    - Any new issues or side effects detected
-    - JIRA incident updated with resolution details and closed
-    - SLA compliance verification
-    - Lessons learned and process improvements
-    Format: Final status report with deployment outcomes, incident closure confirmation, and JSM resolution
+    - Deployment status and success confirmation with detailed timeline
+    - Post-deployment health checks and monitoring results with specific metrics
+    - Verification that the original issue is resolved with evidence
+    - Any new issues or side effects detected during validation
+    - JIRA incident updated through complete workflow states with structured comments
+    - Final resolution including SLA compliance verification
+    - Lessons learned, preventive measures, and process improvements identified
+    - Complete audit trail of all JIRA state transitions and updates
+    Format: Final status report with deployment outcomes, complete JIRA workflow compliance, and comprehensive incident resolution documentation
   agent: deployment_monitor
   context:
     - monitor_jira_incidents
@@ -121,3 +336,42 @@ crew_config:
   memory: true
   max_rpm: 10
   share_crew: false
+
+# JIRA Workflow Compliance Standards
+jira_workflow_standards:
+  mandatory_transitions:
+    - "To Do → In Progress (jira_monitor)"
+    - "In Progress → RCA Completed (root_cause_analyzer)"
+    - "RCA Completed → Code Fix Completed (code_fix_generator)"
+    - "Code Fix Completed → Deployment Done (deployment_monitor)"
+    - "Deployment Done → Deployment Validated (deployment_monitor)"
+    - "Deployment Validated → Done (deployment_monitor)"
+  
+  escalation_transitions:
+    - "Any State → Needs Human Intervention (any agent when issues arise)"
+  
+  comment_structure_requirements:
+    mandatory_sections:
+      - "Agent identification and timestamp"
+      - "Current findings or progress update"
+      - "Actions taken during this phase"
+      - "Evidence or supporting data"
+      - "Next steps or recommendations"
+    
+    technical_formatting:
+      - "Use markdown for code snippets and logs"
+      - "Include clickable links to GitHub PRs, monitoring dashboards"
+      - "Reference specific Kubernetes resources with namespaces"
+      - "Timestamp all activities in UTC"
+  
+  validation_requirements:
+    - "Verify state transition was successful before proceeding"
+    - "Confirm comment was added to JIRA before continuing"
+    - "Validate all required fields are populated"
+    - "Ensure workflow compliance at each step"
+  
+  error_handling:
+    - "Log detailed error information when JIRA operations fail"
+    - "Retry JIRA operations with exponential backoff"
+    - "Escalate to human intervention if JIRA workflow cannot be maintained"
+    - "Preserve audit trail even during error conditions"

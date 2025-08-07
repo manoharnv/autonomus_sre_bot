@@ -8,7 +8,11 @@ import yaml
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+from pathlib import Path
 from dotenv import load_dotenv
+from crewai.project import CrewBase, agent, crew, task
+
+from autonomous_sre_bot.tools.middleware_logs_tool import MiddlewareLogsTool
 
 # Import and setup logging first
 from .logging_config import setup_logging
@@ -16,6 +20,11 @@ from .logging_config import setup_logging
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai.memory import LongTermMemory
 
+# Store in project directory
+project_root = Path(__file__).parent
+storage_dir = "crewai_storage"
+
+os.environ["CREWAI_STORAGE_DIR"] = str(storage_dir)
 # Import JSM Specialized Tools (keeping these for specific functionality)
 try:
     from .tools.jsm_specialized_tools import (
@@ -40,13 +49,14 @@ except ImportError:
 # Import MCP tools
 from .tools.mcp_github_tool import get_github_mcp_tools
 from .tools.kubernetes_crewai_tools import get_kubernetes_crewai_tools
-from .tools.jira_mcp_tools import get_support_team_jira_tools, get_atlassian_mcp_tools
+from .tools.jira_mcp_tools import  get_atlassian_mcp_tools
 
 # Load environment variables
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+@CrewBase
 class SelfHealingCrew:
     """
     Refactored Autonomous SRE Self-Healing Crew
@@ -58,34 +68,60 @@ class SelfHealingCrew:
     4. Independent execution: Crew runs without external state management orchestration
     """
     
-    def __init__(self, config_path: str = "src/autonomous_sre_bot/config", log_level: str = "INFO"):
+    agents_config = 'config/self_heal_agents.yaml'
+    tasks_config = 'config/self_heal_tasks.yaml'
+    """
+    Refactored Autonomous SRE Self-Healing Crew
+    
+    Architecture:
+    1. Agent-driven workflow: Agents use direct JIRA MCP tools for issue management
+    2. JIRA as source of truth: All incident state management goes through JIRA MCP tools
+    3. Consistent tool usage: Follows the same pattern as Kubernetes MCP tools
+    4. Independent execution: Crew runs without external state management orchestration
+    """
+    
+    def __init__(self, log_level: str = "INFO"):
         # Setup logging first
         setup_logging(log_level)
         
-        self.config_path = config_path
-        self.agents_config = self._load_config("self_heal_agents.yaml")
-        self.tasks_config = self._load_config("self_heal_tasks.yaml")
-        
         # Initialize LLM
-        self.llm = LLM(
+        self.deepseak_llm = LLM(
             model="deepseek-chat",
             base_url="https://api.deepseek.com/v1",
             api_key=os.getenv('OPENAI_API_KEY')
         )
+
+        self.llm = LLM(
+            model="gemini/gemini-2.5-flash",
+            temperature=0.7,
+        )
+                    
+        # Initialize JIRA MCP tools once
+        self.jira_mcp_tools = self._initialize_jira_mcp_tools()
         
-        # Validate GitHub integration
-        self._validate_github_integration()
-        
-        # Initialize crew components
-        self.agents = {}
-        self.tasks = {}
-        
-        # Build the agents and tasks
-        self._build_agents()
-        self._build_tasks()
-        
-        # Build the crew
-        self.crew = self._build_crew()
+        logger.info("SelfHealingCrew initialized with CrewAI annotations")
+    
+    def _initialize_jira_mcp_tools(self):
+        """Initialize JIRA MCP tools once for reuse across agents"""
+        try:
+            jira_tool_filter = [
+                'jira_get_issue',
+                'jira_search',
+                'jira_search_fields',
+                'jira_get_project_issues',
+                'jira_get_transitions',
+                'jira_create_issue',
+                'jira_update_issue',
+                'jira_add_comment',
+                'jira_add_worklog',
+                'jira_transition_issue'
+            ]
+            jira_mcp_tools = get_atlassian_mcp_tools(tool_filter=jira_tool_filter, services=["jira"])
+            logger.info(f"Successfully got {len(jira_mcp_tools)} filtered JIRA tools")
+            return jira_mcp_tools
+        except Exception as e:
+            logger.warning(f"JIRA MCP tools not available: {e}")
+            return []
     
     def _load_config(self, filename: str) -> Dict[str, Any]:
         """Load YAML configuration file"""
@@ -100,93 +136,48 @@ class SelfHealingCrew:
         except yaml.YAMLError as e:
             logger.error(f"Error parsing YAML file {config_file}: {e}")
             raise
-    
-    def _validate_github_integration(self):
-        """Validate GitHub integration setup"""
-        github_token = os.getenv('GITHUB_TOKEN') or os.getenv('GITHUB_PERSONAL_ACCESS_TOKEN')
-        github_owner = os.getenv('GITHUB_OWNER')
-        github_repo = os.getenv('GITHUB_REPO')
-        
-        if not github_token:
-            logger.warning("GitHub token not found. Set GITHUB_TOKEN environment variable for full functionality")
-        else:
-            logger.info("GitHub token configured for MCP integration")
-            
-        if not github_owner:
-            logger.warning("GITHUB_OWNER not set. Some GitHub operations may not work correctly")
-            
-        if not github_repo:
-            logger.warning("GITHUB_REPO not set. Repository operations will need manual specification")
-            
-        logger.info("GitHub integration validation complete")
-    
-    def _build_agents(self):
-        """Build all agents with direct MCP tools (following Kubernetes pattern)"""
-        
-        # Get JIRA MCP Tools directly (following the Kubernetes pattern)
-        try:
-            jira_mcp_tools = get_support_team_jira_tools()
-            logger.info(f"Successfully got {len(jira_mcp_tools)} JIRA MCP tools")
-        except Exception as e:
-            logger.warning(f"JIRA MCP tools not available: {e}")
-            jira_mcp_tools = []
-        
-        # Additional JSM tools (keeping specialized tools for now)
-        jsm_knowledge_search = JSMKnowledgeSearchTool()
-        jsm_sla_monitor = JSMSLAMonitorTool()
-        jsm_service_monitor = JSMServiceDeskMonitorTool()
-        jsm_incident_updater = JSMIncidentUpdaterTool()
-        
-        # Agent 1: Incident Fetcher and Coordinator Agent
-        incident_coordinator_config = self.agents_config['jira_monitor']
-        
-        # Tools for incident coordination: JIRA MCP tools + specialized JSM tools
-        coordinator_tools = jira_mcp_tools + [
-            jsm_service_monitor,
-            jsm_sla_monitor,
-            jsm_knowledge_search
-        ]
-        
-        self.agents['incident_coordinator'] = Agent(
-            role="Incident Coordinator and Fetcher",
-            goal="""
-            Fetch incidents assigned to the autonomous SRE system and coordinate their resolution.
-            Use JIRA MCP tools to find incidents that need automated resolution and manage their workflow states.
-            """,
-            backstory="""
-            You are the incident coordinator for the autonomous SRE system. Your job is to:
-            1. Fetch incidents from JIRA using MCP tools for searching and getting issue details
-            2. Check the current state of incidents using JIRA MCP tools
-            3. Coordinate with other agents to resolve incidents
-            4. Transition incident states using JIRA MCP transition tools
-            5. Ensure incidents are properly tracked throughout the resolution process
-            
-            You have access to the full JIRA MCP toolkit and can manage incident lifecycles effectively.
-            """,
-            tools=coordinator_tools,
-            max_iter=incident_coordinator_config.get('max_iter', 3),
-            memory=incident_coordinator_config.get('memory', True),
-            verbose=incident_coordinator_config.get('verbose', True),
-            allow_delegation=True,  # Can delegate to analysis and fix agents
-            llm=self.llm
+    @agent
+    def incident_resolution_manager(self) -> Agent:
+        """Agent to manage the complete incident resolution workflow"""
+        return Agent(
+            config=self.agents_config['incident_resolution_manager'],
+            tools=[],  # This agent delegates to others, doesn't need direct tools
+            llm=self.llm,
+            verbose=True
         )
+
+    @agent
+    def jira_manager(self) -> Agent:
+        """Agent to handle all JIRA-related operations"""
+        return Agent(
+            config=self.agents_config['jira_manager'],
+            tools=self.jira_mcp_tools,
+            llm=self.llm,
+            verbose=True
+        )
+
+    @agent 
+    def root_cause_analyzer(self) -> Agent:
+        """Agent for analyzing root causes of incidents"""
+        # Get tools for root cause analysis (no JIRA tools - delegates to JIRA manager)
+        rca_tools = []
         
-        # Agent 2: Root Cause Analyzer Agent
-        rca_config = self.agents_config['root_cause_analyzer']
-        
-        rca_tools = jira_mcp_tools + [
-            jsm_knowledge_search,
-            jsm_incident_updater
-        ]
+        # Add JSM knowledge search for historical incident patterns
+        jsm_knowledge_search = JSMKnowledgeSearchTool()
+        rca_tools.append(MiddlewareLogsTool())
         
         # Get Kubernetes MCP tools for root cause analysis
         try:
             k8s_analysis_tools = get_kubernetes_crewai_tools([
                 'pods_list',
                 'pods_get', 
-                'pods_logs',
                 'events_list',
-                'configuration_view'
+                'configuration_view',
+                'pods_list_in_namespace',
+                'pods_top',
+                'resources_create_or_update',
+                'resources_get',
+                'resources_list'
             ])
             if k8s_analysis_tools:
                 rca_tools.extend(k8s_analysis_tools)
@@ -195,38 +186,47 @@ class SelfHealingCrew:
                 logger.info("Kubernetes CrewAI tools not available for root cause analysis")
         except Exception as e:
             logger.warning(f"Kubernetes CrewAI tools not available: {e}")
-            logger.info("Root cause analyzer will use JSM tools only")
+            logger.info("Root cause analyzer will proceed without K8s tools")
         
-        self.agents['root_cause_analyzer'] = Agent(
-            role=rca_config['role'],
-            goal=rca_config['goal'],
-            backstory=rca_config['backstory'],
+        # Get GitHub MCP tools for source code analysis
+        try:
+            github_analysis_tools = get_github_mcp_tools(tool_names=[
+                'get_file_contents',
+                'search_code',
+                'search_repositories',
+                'create_pull_request_with_copilot'
+            ])
+            if github_analysis_tools:
+                rca_tools.extend(github_analysis_tools)
+                logger.info(f"Successfully got {len(github_analysis_tools)} GitHub MCP tools for source code analysis")
+            else:
+                logger.info("GitHub MCP tools not available for source code analysis")
+        except Exception as e:
+            logger.warning(f"GitHub MCP tools not available: {e}")
+            logger.info("Root cause analyzer will proceed without GitHub tools")
+        
+        return Agent(
+            config=self.agents_config['root_cause_analyzer'],
             tools=rca_tools,
-            max_iter=rca_config.get('max_iter', 5),
-            memory=rca_config.get('memory', True),
-            verbose=rca_config.get('verbose', True),
-            allow_delegation=rca_config.get('allow_delegation', True),
             llm=self.llm
         )
+
+    @agent
+    def code_fix_generator(self) -> Agent:
+        """Agent for generating code fixes and managing pull requests"""
+        # Get tools for code fixes (no JIRA tools - delegates to JIRA manager)
+        fix_tools = []
         
-        # Agent 3: Code Fix Generator and PR Manager Agent
-        fix_config = self.agents_config['code_fix_generator']
-        
-        fix_tools = jira_mcp_tools + [
-            jsm_knowledge_search,
-            jsm_incident_updater
-        ]
+        # Additional JSM tools (keeping specialized tools for now)
+        jsm_knowledge_search = JSMKnowledgeSearchTool()
+        fix_tools.append(jsm_knowledge_search)
         
         # Get GitHub MCP tools for code fixes and PR management
         try:
-            github_fix_tools = get_github_mcp_tools([
-                'github_create_or_update_file',
-                'github_create_pull_request',
-                'github_get_file',
-                'github_list_files',
-                'github_get_pull_request',
-                'github_merge_pull_request',
-                'github_list_pull_requests'
+            github_fix_tools = get_github_mcp_tools(tool_names=[
+                'search_code',
+                'search_repositories',
+                'create_pull_request_with_copilot'
             ])
             if github_fix_tools:
                 fix_tools.extend(github_fix_tools)
@@ -237,22 +237,17 @@ class SelfHealingCrew:
             logger.warning(f"GitHub MCP tools not available: {e}")
             logger.info("Code fix generator will use JSM tools only")
         
-        self.agents['code_fix_generator'] = Agent(
-            role=fix_config['role'],
-            goal=fix_config['goal'],
-            backstory=fix_config['backstory'],
+        return Agent(
+            config=self.agents_config['code_fix_generator'],
             tools=fix_tools,
-            max_iter=fix_config.get('max_iter', 5),
-            memory=fix_config.get('memory', True),
-            verbose=fix_config.get('verbose', True),
-            allow_delegation=fix_config.get('allow_delegation', True),
             llm=self.llm
         )
-        
-        # Agent 4: Deployment Monitor Agent
-        deploy_config = self.agents_config['deployment_monitor']
-        
-        deploy_tools = jira_mcp_tools + [jsm_incident_updater]
+
+    @agent
+    def deployment_monitor(self) -> Agent:
+        """Agent for monitoring deployments and verifying resolution"""
+        # Get tools for deployment monitoring (no JIRA tools - delegates to JIRA manager)
+        deploy_tools = []
         
         # Get Kubernetes MCP tools for deployment monitoring
         try:
@@ -269,175 +264,73 @@ class SelfHealingCrew:
                 logger.info("Kubernetes CrewAI tools not available for deployment monitoring")
         except Exception as e:
             logger.warning(f"Kubernetes CrewAI tools not available: {e}")
-            logger.info("Deployment monitor will use JSM tools only")
+            logger.info("Deployment monitor will use basic tools only")
         
-        self.agents['deployment_monitor'] = Agent(
-            role=deploy_config['role'],
-            goal=deploy_config['goal'],
-            backstory=deploy_config['backstory'],
+        return Agent(
+            config=self.agents_config['deployment_monitor'],
             tools=deploy_tools,
-            max_iter=deploy_config.get('max_iter', 4),
-            memory=deploy_config.get('memory', True),
-            verbose=deploy_config.get('verbose', True),
-            allow_delegation=deploy_config.get('allow_delegation', False),
             llm=self.llm
         )
-        
-        logger.info("Successfully built all 4 agents with direct JIRA MCP tools")
-        
-        # Log tool counts for debugging
-        for agent_name, agent in self.agents.items():
-            logger.info(f"{agent_name}: {len(agent.tools)} tools configured")
-    
-    def _build_tasks(self):
-        """Build tasks for the refactored workflow"""
-        
-        # Task 1: Fetch and Coordinate Incidents
-        self.tasks['fetch_and_coordinate'] = Task(
-            description="""
-            Use JIRA MCP tools to fetch incidents that need automated resolution.
-            
-            Your workflow:
-            1. Use JIRA MCP search tools to get incidents assigned to the autonomous SRE system
-               - Look for incidents with high or critical priority
-               - Check for incidents assigned to 'autonomous-sre' or similar
-            2. For each incident found:
-               - Use JIRA MCP get issue tools to get the current workflow state and details
-               - Determine what action is needed based on the state
-               - Use JIRA MCP transition tools to move incidents to appropriate states
-            3. Coordinate with other agents to resolve incidents:
-               - Delegate analysis tasks to the root cause analyzer
-               - Delegate fix generation to the code fix generator
-               - Delegate PR management to the PR manager
-               - Delegate deployment monitoring to the deployment monitor
-            4. Use JIRA MCP tools to track progress and update incident information
-            
-            Focus on incidents that can be automatically resolved and ensure proper state management.
-            """,
-            expected_output="""
-            A detailed report containing:
-            1. List of incidents fetched and their current states
-            2. Actions taken for each incident (state transitions, delegations)
-            3. Coordination plan for resolving each incident
-            4. Any incidents that require human intervention
-            5. Updated incident metadata with coordination information
-            """,
-            agent=self.agents['incident_coordinator']
+    @task
+    def monitor_jira_incidents(self) -> Task:
+        """Task to monitor for new incidents and manage resolution"""
+        return Task(
+            config=self.tasks_config['monitor_jira_incidents'],
+            agent=self.incident_resolution_manager(),
         )
-        
-        # Task 2: Root Cause Analysis
-        self.tasks['root_cause_analysis'] = Task(
-            description="""
-            Perform detailed root cause analysis for incidents assigned by the coordinator.
-            
-            Your workflow:
-            1. Use JIRA MCP tools to verify incident details and current state
-            2. Use Kubernetes tools to investigate:
-               - Pod status and logs using pods_list, pods_get, and pods_logs
-               - Recent events using events_list
-               - Configuration issues using configuration_view
-            3. Use jsm_search_knowledge to find similar incidents and solutions
-            4. Analyze the data to identify the root cause
-            5. Use JIRA MCP transition tools to move incident to "RCA Completed"
-            6. Use JIRA MCP tools to update incident with detailed analysis results
-            
-            Provide thorough, evidence-based root cause analysis.
-            """,
-            expected_output="""
-            Comprehensive root cause analysis including:
-            1. Description of the incident and its symptoms
-            2. Detailed investigation steps taken
-            3. Evidence gathered from logs, events, and configuration
-            4. Root cause identification with supporting data
-            5. Recommended fix approach
-            6. Impact assessment and urgency level
-            """,
-            agent=self.agents['root_cause_analyzer']
+
+    @task
+    def manage_jira_operations(self) -> Task:
+        """Task to handle all JIRA-related operations"""
+        return Task(
+            config=self.tasks_config['manage_jira_operations'],
+            agent=self.jira_manager()
         )
-        
-        # Task 3: Generate Code Fixes and Manage Pull Requests
-        self.tasks['generate_fixes_and_prs'] = Task(
-            description="""
-            Generate automated fixes based on root cause analysis results and manage the complete PR lifecycle.
-            
-            Your workflow:
-            1. Use jsm_state_checker to get incident details and analysis results
-            2. Use jsm_search_knowledge to find proven fix patterns
-            3. Generate appropriate fixes using GitHub tools:
-               - Use github_get_file to examine current configurations
-               - Use github_create_or_update_file to create fix files
-               - Ensure fixes are tested and follow best practices
-            4. Create and manage pull requests:
-               - Use github_create_pull_request to create PRs for fixes
-               - Use github_get_pull_request to monitor PR status
-               - Use github_merge_pull_request when appropriate
-            5. Use jsm_state_transition to move incident to "Code Fix Completed" when PR is merged and ready for deployment
-            6. Use jsm_metadata_updater to store fix details, file locations, and PR information
-            
-            Generate precise, tested fixes and manage the complete PR lifecycle.
-            """,
-            expected_output="""
-            Complete fix and PR management report including:
-            1. Description of the fix approach and rationale
-            2. List of files created or modified
-            3. Code changes with explanations
-            4. PR creation details with links
-            5. PR review and merge status
-            6. Deployment readiness confirmation
-            7. Rollback plan if needed
-            """,
-            agent=self.agents['code_fix_generator']
+
+    @task
+    def analyze_kubernetes_root_cause(self) -> Task:
+        """Task for root cause analysis"""
+        return Task(
+            config=self.tasks_config['analyze_kubernetes_root_cause'],
+            agent=self.root_cause_analyzer()
         )
-        
-        # Task 4: Monitor Deployment and Verify Resolution
-        self.tasks['monitor_deployment'] = Task(
-            description="""
-            Monitor deployment of fixes and verify incident resolution.
-            
-            Your workflow:
-            1. Use jsm_state_checker to get deployment details from incident metadata
-            2. Use Kubernetes tools to monitor deployment:
-               - Use deployments_get to check deployment status
-               - Use pods_list to verify new pods are running
-               - Use events_list to check for deployment issues
-            3. Verify the fix resolves the original issue
-            4. Use jsm_state_transition to update states through the simplified workflow:
-               - "Deployment Done" when deployment succeeds
-               - "Deployment Validated" when deployment is verified
-               - "Resolved" when issue is fully resolved
-            5. Use jsm_metadata_updater to store verification results
-            
-            Ensure fixes are properly deployed and incidents are resolved following the simplified state lifecycle.
-            """,
-            expected_output="""
-            Deployment and verification report including:
-            1. Deployment status and timeline
-            2. Verification test results
-            3. Confirmation that original issue is resolved
-            4. Performance impact assessment
-            5. Final incident resolution status
-            6. Lessons learned and recommendations
-            """,
-            agent=self.agents['deployment_monitor']
+
+    @task
+    def generate_code_fix_and_pr(self) -> Task:
+        """Task to generate fixes and manage PRs"""
+        return Task(
+            config=self.tasks_config['generate_code_fix_and_pr'],
+            agent=self.code_fix_generator()
         )
-        
-        logger.info("Successfully built all tasks for simplified refactored workflow")
-    
-    def _build_crew(self):
-        """Build the crew with sequential process"""
-        
-        # Use sequential process since we want coordinated workflow
+
+    @task
+    def monitor_deployment_verification(self) -> Task:
+        """Task to monitor deployment and validate resolution"""
+        return Task(
+            config=self.tasks_config['monitor_deployment_verification'],
+            agent=self.deployment_monitor()
+        )
+
+    @crew
+    def crew(self) -> Crew:
+        """Creates the Self-Healing crew"""
         return Crew(
-            agents=list(self.agents.values()),
-            tasks=list(self.tasks.values()),
+            agents=self.agents,
+            tasks=self.tasks,
             process=Process.sequential,
             memory=True,
             verbose=True,
-            max_rpm=10,
+            max_rpm=50,
             planning=True,
-            planning_llm=self.llm
+            planning_llm=self.llm,
+            embedder={
+                "provider": "google",
+                "config":{
+                    "api_key": os.getenv('GEMINI_API_KEY'),
+                    "model": os.getenv('GEMINI_EMBEDDER_MODEL_NAME', 'gemini-embedding-001')
+                }
+            }
         )
-    
     def execute_self_healing_workflow(self, inputs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Execute the refactored self-healing workflow
@@ -452,16 +345,18 @@ class SelfHealingCrew:
             inputs = {
                 "timestamp": datetime.now().isoformat(),
                 "workflow_type": "refactored_autonomous_self_healing",
-                "assignee_filter": "autonomous-sre",
-                "priority_filter": "High,Critical",
-                "max_incidents": 5
+                "assignee_filter": "557058:b8c43659-da51-41e3-a0a3-010b05cbc4a3",
+                "project_filter": "SUP",
+                "priority_filter": "High,Highest",
+                "max_incidents": 5,
+                "github_repo_url": "https://github.com/manoharnv/faulty-app.git"
             }
         
         logger.info(f"Starting refactored self-healing workflow with inputs: {inputs}")
         
         try:
             # Execute the crew workflow
-            result = self.crew.kickoff(inputs=inputs)
+            result = self.crew().kickoff(inputs=inputs)
             
             return {
                 "success": True,
@@ -483,7 +378,6 @@ class SelfHealingCrew:
             }
 
 # Factory function
-def create_self_healing_crew(config_path: str = "src/autonomous_sre_bot/config", 
-                           log_level: str = "INFO") -> SelfHealingCrew:
+def create_self_healing_crew(log_level: str = "INFO") -> SelfHealingCrew:
     """Create self-healing crew instance"""
-    return SelfHealingCrew(config_path=config_path, log_level=log_level)
+    return SelfHealingCrew(log_level=log_level)

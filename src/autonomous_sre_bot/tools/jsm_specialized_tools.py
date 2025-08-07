@@ -142,7 +142,7 @@ class JSMServiceDeskMonitorTool(BaseTool):
                 elif query_type == "open_incidents":
                     jql = "project in (SUP) AND status in ('To Do', 'In Progress', 'Open', 'New') AND priority in (High, Highest, Critical) ORDER BY created DESC"
                 elif query_type in ["high_priority", "sla_breach"]:
-                    jql = "project in (SUP) AND priority in (High, Highest, Critical) ORDER BY created DESC"
+                    jql = "project in (SUP) AND priority in (High, Highest) ORDER BY created DESC"
                 else:
                     jql = "project in (SUP) ORDER BY created DESC"
                 
