@@ -15,14 +15,18 @@ class IncidentManagementCrew():
     tasks_config = 'config/tasks.yaml'
     
     def __init__(self):
-        self.llm = LLM(model="deepseek/deepseek-chat")
+        self.llm = LLM(
+            model="deepseek-chat", 
+            base_url="https://api.deepseek.com/v1",
+            api_key=os.getenv('OPENAI_API_KEY')
+        )
     
     @agent
     def log_collector(self) -> Agent:
         return Agent(
             config=self.agents_config['log_collector'],
             tools=[MiddlewareLogsTool()],
-            verbose=True,
+            verbose=False,
             llm=self.llm
         )
     
@@ -30,7 +34,7 @@ class IncidentManagementCrew():
     def log_analyzer(self) -> Agent:
         return Agent(
             config=self.agents_config['log_analyzer'],
-            verbose=True,
+            verbose=False,
             llm=self.llm,
             reasoning=True
         )
@@ -40,7 +44,7 @@ class IncidentManagementCrew():
         return Agent(
             config=self.agents_config['incident_manager'],
             tools=[JSMIncidentCreatorTool()],
-            verbose=True,
+            verbose=False,
             llm=self.llm
         )
     

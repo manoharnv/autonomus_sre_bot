@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  mcp-atlassian:
+    image: ghcr.io/sooperset/mcp-atlassian:latest
+    container_name: mcp-atlassian-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Transport Configuration - streamable-http mode
+      TRANSPORT: ${TRANSPORT:-streamable-http}
+      PORT: ${PORT:-8080}
+      HOST: ${HOST:-0.0.0.0}
+      
+      # Essential Atlassian Instance URLs
+      JIRA_URL: ${ATLASSIAN_URL}
+      CONFLUENCE_URL: ${ATLASSIAN_URL}/wiki
+      
+      # Authentication - Using API Token method (recommended for Cloud)
+      JIRA_USERNAME: ${ATLASSIAN_USER_ID}
+      JIRA_API_TOKEN: ${ATLASSIAN_TOKEN}
+      CONFLUENCE_USERNAME: ${ATLASSIAN_USER_ID}
+      CONFLUENCE_API_TOKEN: ${ATLASSIAN_TOKEN}
+      
+      # Optional Configuration
+      READ_ONLY_MODE: ${READ_ONLY_MODE:-false}
+      MCP_VERBOSE: ${MCP_VERBOSE:-true}
+      MCP_LOGGING_STDOUT: ${MCP_LOGGING_STDOUT:-true}
+      
+      # Content Filtering
+      CONFLUENCE_SPACES_FILTER: ${CONFLUENCE_SPACES_FILTER:-}
+      JIRA_PROJECTS_FILTER: ${JIRA_PROJECTS_FILTER:-}
+      
+      # Tool Filtering - enable specific tools
+      ENABLED_TOOLS: ${ENABLED_TOOLS:-}
+      
+      # Cloud ID for OAuth (if using OAuth instead of API tokens)
+      ATLASSIAN_CLOUD_ID: ${ATLASSIAN_CLOUD_ID:-}
+      
+      # Service Desk Configuration
+      ATLASSIAN_SERVICE_DESK_ID: ${ATLASSIAN_SERVICE_DESK_ID:-}
+      ATLASSIAN_REQUEST_TYPE_ID: ${ATLASSIAN_REQUEST_TYPE_ID:-}
+      ATLASSIAN_INCIDENT_REQUEST_TYPE_ID: ${ATLASSIAN_INCIDENT_REQUEST_TYPE_ID:-}
+      
+    env_file:
+      - .env
+    volumes:
+      # Optional: Mount logs directory for persistent logging
+      - ./logs/mcp-atlassian:/app/logs
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - atlassian-network
+
+networks:
+  atlassian-network:
+    driver: bridge

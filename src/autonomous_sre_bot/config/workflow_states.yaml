@@ -1,0 +1,96 @@
+# JSM State-Driven Workflow Configuration - Simplified
+
+# Simplified Workflow States mapped to JSM ticket statuses
+workflow_states:
+  TODO: "To Do"
+  IN_PROGRESS: "In Progress"
+  RCA_COMPLETED: "RCA Completed"
+  CODE_FIX_COMPLETED: "Code Fix Completed"
+  DEPLOYMENT_DONE: "Deployment Done"
+  DEPLOYMENT_VALIDATED: "Deployment Validated"
+  RESOLVED: "Done"
+  FAILED: "Failed"
+  REQUIRES_HUMAN: "Needs Human Intervention"
+
+# Simplified State transitions and responsible agents
+state_transitions:
+  TODO:
+    agent: "jira_monitor"
+    next_states: ["IN_PROGRESS", "REQUIRES_HUMAN"]
+    max_retry_count: 3
+    description: "New incident needs analysis"
+    
+  IN_PROGRESS:
+    agent: "root_cause_analyzer"
+    next_states: ["RCA_COMPLETED", "REQUIRES_HUMAN"]
+    max_retry_count: 2
+    timeout_minutes: 45
+    description: "Root cause analysis in progress"
+    
+  RCA_COMPLETED:
+    agent: "code_fix_generator"
+    next_states: ["CODE_FIX_COMPLETED", "REQUIRES_HUMAN"]
+    max_retry_count: 2
+    timeout_minutes: 60
+    description: "Generate and implement code fix"
+    
+  CODE_FIX_COMPLETED:
+    agent: "deployment_monitor"
+    next_states: ["DEPLOYMENT_DONE", "REQUIRES_HUMAN"]
+    max_retry_count: 3
+    timeout_minutes: 30
+    description: "Deploy fix to production"
+    
+  DEPLOYMENT_DONE:
+    agent: "deployment_monitor"
+    next_states: ["DEPLOYMENT_VALIDATED", "REQUIRES_HUMAN"]
+    max_retry_count: 2
+    timeout_minutes: 15
+    verification_wait_minutes: 10
+    description: "Validate deployment and verify fix"
+    
+  DEPLOYMENT_VALIDATED:
+    agent: "deployment_monitor"
+    next_states: ["RESOLVED"]
+    auto_transition: true
+    description: "Mark incident as resolved"
+
+# Polling configuration for state checks
+polling_config:
+  default_interval_minutes: 10
+  max_polling_hours: 24
+  exponential_backoff: true
+  max_backoff_minutes: 30
+
+# Simplified escalation rules
+escalation_rules:
+  # If analysis takes too long
+  IN_PROGRESS:
+    escalate_after_hours: 2
+    escalate_to_status: "REQUIRES_HUMAN"
+    escalate_assignee: "sre-team-lead"
+    
+  # If code fix takes too long
+  RCA_COMPLETED:
+    escalate_after_hours: 3
+    escalate_to_status: "REQUIRES_HUMAN"
+    escalate_assignee: "dev-team"
+    
+  # If deployment takes too long
+  CODE_FIX_COMPLETED:
+    escalate_after_hours: 1
+    escalate_to_status: "REQUIRES_HUMAN"
+    escalate_assignee: "devops-team"
+    
+  # If validation fails
+  DEPLOYMENT_DONE:
+    escalate_after_minutes: 30
+    escalate_to_status: "REQUIRES_HUMAN"
+    escalate_assignee: "sre-team"
+
+# Retry and timeout configuration
+retry_config:
+  default_max_retries: 2
+  default_timeout_minutes: 30
+  exponential_backoff_factor: 1.5
+  max_backoff_minutes: 60

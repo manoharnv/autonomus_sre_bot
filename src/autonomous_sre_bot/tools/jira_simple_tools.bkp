@@ -1,0 +1,221 @@
+"""
+Simplified JIRA MCP Tools following the Kubernetes pattern
+No async complexity, direct tool execution
+"""
+
+from crewai.tools import BaseTool
+from crewai_tools import MCPServerAdapter
+from mcp import StdioServerParameters
+import os
+import logging
+from typing import List, Optional
+
+logger = logging.getLogger(__name__)
+
+class JiraMCPToolWrapper(BaseTool):
+    """
+    Simple wrapper class for JIRA MCP tools following Kubernetes pattern
+    """
+    
+    name: str = ""
+    description: str = ""
+    
+    def __init__(self, tool_name: str, description: str):
+        super().__init__(name=tool_name, description=description)
+        self._mcp_adapter = None
+        self._initialize_mcp_adapter()
+    
+    def _initialize_mcp_adapter(self):
+        """Initialize the MCP adapter for JIRA tools"""
+        try:
+            # Get required environment variables
+            atlassian_api_token = os.getenv('ATLASSIAN_API_TOKEN') or os.getenv('ATLASSIAN_TOKEN')
+            atlassian_email = os.getenv('ATLASSIAN_EMAIL') or os.getenv('ATLASSIAN_USER_ID')
+            atlassian_domain = os.getenv('ATLASSIAN_DOMAIN') or os.getenv('ATLASSIAN_URL', '').replace('https://', '').replace('.atlassian.net', '')
+            
+            if not all([atlassian_api_token, atlassian_email, atlassian_domain]):
+                logger.error("Missing required Atlassian configuration")
+                self._mcp_adapter = None
+                return
+            
+            # Build JIRA URL
+            if '://' not in atlassian_domain:
+                jira_url = f"https://{atlassian_domain}.atlassian.net"
+            else:
+                jira_url = atlassian_domain.rstrip('/')
+            
+            # Setup environment
+            env = {**os.environ}
+            env.update({
+                'JIRA_URL': jira_url,
+                'JIRA_USERNAME': atlassian_email,
+                'JIRA_API_TOKEN': atlassian_api_token
+            })
+            
+            # MCP server parameters
+            server_params = StdioServerParameters(
+                command="docker",
+                args=[
+                    "run", "-i", "--rm",
+                    "-e", "JIRA_URL",
+                    "-e", "JIRA_USERNAME", 
+                    "-e", "JIRA_API_TOKEN",
+                    "ghcr.io/sooperset/mcp-atlassian:latest"
+                ],
+                env=env
+            )
+            
+            self._mcp_adapter = MCPServerAdapter(server_params)
+            logger.info(f"Initialized MCP adapter for {self.name}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize MCP adapter for {self.name}: {e}")
+            self._mcp_adapter = None
+    
+    def _run(self, **kwargs) -> str:
+        """Execute the MCP tool with the given arguments - SIMPLE VERSION"""
+        if not self._mcp_adapter:
+            return f"Error: {self.name} is not available - MCP adapter not initialized"
+        
+        try:
+            with self._mcp_adapter as mcp_tools:
+                # Find the specific tool we want to use
+                target_tool = None
+                for tool in mcp_tools:
+                    if hasattr(tool, 'name') and tool.name == self.name:
+                        target_tool = tool
+                        break
+                
+                if not target_tool:
+                    available_tools = [getattr(tool, 'name', 'unknown') for tool in mcp_tools]
+                    return f"Error: Tool {self.name} not found. Available: {available_tools}"
+                
+                # Execute the tool directly - NO ASYNC WRAPPER
+                result = target_tool._run(**kwargs)
+                logger.info(f"Successfully executed {self.name}")
+                return str(result)
+                
+        except Exception as e:
+            logger.error(f"Error executing {self.name}: {e}")
+            return f"Error executing {self.name}: {str(e)}"
+
+
+class JiraSearchTool(JiraMCPToolWrapper):
+    """CrewAI tool for searching JIRA issues"""
+    
+    def __init__(self):
+        super().__init__(
+            tool_name="jira_search",
+            description="Search JIRA issues using JQL. Parameters: jql (required), fields (optional), limit (optional)."
+        )
+
+class JiraGetIssueTool(JiraMCPToolWrapper):
+    """CrewAI tool for getting JIRA issue details"""
+    
+    def __init__(self):
+        super().__init__(
+            tool_name="jira_get_issue", 
+            description="Get detailed information about a specific JIRA issue. Requires issue_key parameter."
+        )
+
+class JiraGetTransitionsTool(JiraMCPToolWrapper):
+    """CrewAI tool for getting available JIRA issue transitions"""
+    
+    def __init__(self):
+        super().__init__(
+            tool_name="jira_get_transitions",
+            description="Get available transitions for a JIRA issue. Requires issue_key parameter."
+        )
+
+class JiraTransitionIssueTool(JiraMCPToolWrapper):
+    """CrewAI tool for transitioning JIRA issues"""
+    
+    def __init__(self):
+        super().__init__(
+            tool_name="jira_transition_issue",
+            description="Transition a JIRA issue to a new status. Requires issue_key and transition_id parameters. Optional: comment parameter."
+        )
+
+class JiraAddCommentTool(JiraMCPToolWrapper):
+    """CrewAI tool for adding comments to JIRA issues"""
+    
+    def __init__(self):
+        super().__init__(
+            tool_name="jira_add_comment",
+            description="Add a comment to a JIRA issue. Requires issue_key and comment parameters."
+        )
+
+class JiraUpdateIssueTool(JiraMCPToolWrapper):
+    """CrewAI tool for updating JIRA issues"""
+    
+    def __init__(self):
+        super().__init__(
+            tool_name="jira_update_issue",
+            description="Update a JIRA issue fields. Requires issue_key parameter and field updates."
+        )
+
+
+# Simple factory function following Kubernetes pattern
+def get_simple_jira_tools(tool_names: Optional[List[str]] = None) -> List[JiraMCPToolWrapper]:
+    """
+    Get simple JIRA tools that are compatible with CrewAI agents
+    NO ASYNC COMPLEXITY - follows Kubernetes pattern
+    
+    Args:
+        tool_names: Optional list of specific tool names to include
+        
+    Returns:
+        List of CrewAI-compatible JIRA tool instances
+    """
+    available_tools = {
+        'jira_search': JiraSearchTool,
+        'jira_get_issue': JiraGetIssueTool,
+        'jira_get_transitions': JiraGetTransitionsTool,
+        'jira_transition_issue': JiraTransitionIssueTool,
+        'jira_add_comment': JiraAddCommentTool,
+        'jira_update_issue': JiraUpdateIssueTool
+    }
+    
+    tools = []
+    
+    if tool_names:
+        # Return only requested tools
+        for tool_name in tool_names:
+            if tool_name in available_tools:
+                try:
+                    tool_instance = available_tools[tool_name]()
+                    tools.append(tool_instance)
+                    logger.info(f"Created simple JIRA tool: {tool_name}")
+                except Exception as e:
+                    logger.warning(f"Failed to create tool {tool_name}: {e}")
+            else:
+                logger.warning(f"Unknown tool requested: {tool_name}")
+    else:
+        # Return all available tools
+        for tool_name, tool_class in available_tools.items():
+            try:
+                tool_instance = tool_class()
+                tools.append(tool_instance)
+                logger.info(f"Created simple JIRA tool: {tool_name}")
+            except Exception as e:
+                logger.warning(f"Failed to create tool {tool_name}: {e}")
+    
+    logger.info(f"Created {len(tools)} simple JIRA tools")
+    return tools
+
+# Alias for backward compatibility
+def get_support_team_jira_tools_simple() -> List[JiraMCPToolWrapper]:
+    """
+    Get the most commonly used JIRA tools for support team operations
+    SIMPLE VERSION - no async complexity
+    """
+    support_tools = [
+        'jira_search',
+        'jira_get_issue',
+        'jira_get_transitions', 
+        'jira_transition_issue',
+        'jira_add_comment',
+        'jira_update_issue'
+    ]
+    
+    return get_simple_jira_tools(tool_names=support_tools)

@@ -1,16 +1,44 @@
-Successfully created Jira incident with all required details:
-- Key: SUP-43
-- Summary: "MiddlewareLogsTool Failure: Unable to Retrieve Logs from Middleware.io"
+The incident has been successfully created in Jira Service Management with all required details. Here is the complete content:
+
+Incident Details:
+- Key: SUP-57
+- Summary: Critical: Database Initialization Failures in python-service-1
 - Type: Incident
-- Priority: High (justified by critical impact on monitoring systems and inability to perform root cause analysis)
-- URL: https://manoharnv.atlassian.net/browse/SUP-43
+- Priority: Highest
+- URL: https://manoharnv.atlassian.net/browse/SUP-57
 
-The incident includes:
-1. Comprehensive Incident Overview section
-2. Detailed Error Details in tabular format
-3. Root Cause Analysis with bullet points
-4. Impact Assessment table
-5. Actionable Recommendations
-6. Priority Justification section
+Full Incident Description (ADF Format):
 
-All content is properly formatted in Atlassian Document Format (ADF) with appropriate headings, tables, and bullet lists. The incident contains all key elements from the analysis report and follows the required structure.
+**Incident Overview**
+Multiple database initialization failures detected in python-service-1 across multiple Kubernetes pods. The issue is causing service degradation and cascading errors in todo operations.
+
+**Error Details**
+
+| Error Type           | Error Message                              | Code Location                  | Timestamps                     | Impact                     |
+|----------------------|-------------------------------------------|--------------------------------|--------------------------------|----------------------------|
+| Database Initialization | Failed to initialize database          | /app/app.py, <module>, Line 609 | 12:55 - 20:53 (14 occurrences) | Service startup failures   |
+| Database Lock        | Database is locked                       | /app/app.py, get_todos, Line 370 | 19:56:05                      | Todo operations blocked    |
+| Todo Fetching       | Error fetching todos: list index out of range | /app/app.py, get_todos, Line 373 | 19:56:03-19:56:11 (4 occurrences) | Data inconsistency |
+
+**Affected Services**
+- python-service-1 (primary)
+- Services consuming python-service-1 APIs
+
+**Root Cause Analysis**
+- Database connection pool exhaustion
+- Incorrect database credentials or configuration
+- Network connectivity issues between pods and database
+- Database resource constraints (CPU/memory)
+
+**Recommendations**
+- Implement connection retry logic with exponential backoff
+- Validate database credentials and connection strings
+- Increase database connection pool size
+- Add proper bounds checking for list operations in todo service
+
+**Priority Justification**
+This incident is classified as 'Highest' priority due to:
+- High frequency of errors (17 in 24 hours)
+- Multiple pods affected across the cluster
+- Service degradation impacting core functionality
+- Potential data inconsistency issues
